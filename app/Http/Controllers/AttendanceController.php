@@ -5,62 +5,85 @@ namespace App\Http\Controllers;
 use App\Models\Attendance;
 use App\Http\Requests\StoreAttendanceRequest;
 use App\Http\Requests\UpdateAttendanceRequest;
+use App\Models\Schedule;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 class AttendanceController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    public function getClassAttendance($scheduleId, $date): JsonResponse
     {
-        //
-    }
+        $schedule = Schedule::with([
+            'schoolClass.subject',
+            'schoolClass.teacher.profile',
+            'schoolClass.classGroup.enrollments.student.profile',
+            'classroom'
+        ])->findOrFail($scheduleId);
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
+        $enrollments = $schedule->schoolClass->classGroup->enrollments
+            ->where('status', 'active');
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(StoreAttendanceRequest $request)
-    {
-        //
-    }
+        $studentIds = $enrollments->pluck('student_id');
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(Attendance $attendance)
-    {
-        //
-    }
+        $attendances = Attendance::whereIn('student_id', $studentIds)
+            ->where('schedule_id', $scheduleId)
+            ->where('attendance_date', $date)
+            ->get()
+            ->keyBy('student_id');
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Attendance $attendance)
-    {
-        //
-    }
+        $students = $enrollments->map(function ($enrollment) use ($attendances) {
+            $student = $enrollment->student;
+            $existingAttendance = $attendances->get($student->id);
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(UpdateAttendanceRequest $request, Attendance $attendance)
-    {
-        //
-    }
+            return [
+                'student_id' => $student->id,
+                'last_name' => $student->profile->last_name,
+                'name' => $student->profile->first_name,
+                'current_attendance' => $existingAttendance ? [
+                    'status' => $existingAttendance->status,
+                    'notes' => $existingAttendance->notes,
+                    'recorded_at' => $existingAttendance->created_at
+                ] : null
+            ];
+        });
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Attendance $attendance)
-    {
-        //
+        $schoolClass =$schedule->schoolClass;
+        $totalStudents = $schoolClass->students()->count();
+
+        if ($totalStudents === 0) {
+            $completedDates = [];
+            $incompleteDates = [];
+        } else {
+            $completedDates = Attendance::where('school_class_id', $schoolClass->id)
+                ->select('attendance_date')
+                ->groupBy('attendance_date')
+                ->havingRaw('COUNT(DISTINCT student_id) = ?', [$totalStudents])
+                ->pluck('attendance_date')
+                ->toArray();
+
+            $allDates = Attendance::where('school_class_id', $schoolClass->id)
+                ->distinct()
+                ->pluck('attendance_date')
+                ->toArray();
+
+            $incompleteDates = array_values(array_diff($allDates, $completedDates));
+        }
+
+        return response()->json([
+            'success' => true,
+            'schedule_info' => [
+                'schedule_id' => $schedule->id,
+                'subject' => $schedule->schoolClass->subject->name,
+                'class_group' => $schedule->schoolClass->classGroup->name,
+                'day' => $schedule->day,
+                'time' => $schedule->start_time . ' - ' . $schedule->end_time,
+                'classroom' => $schedule->classroom ? $schedule->classroom->name : 'Sin aula asignada',
+                'attendance_date' => $date
+            ],
+            'markedDates' => [
+                'completedDates' => $completedDates,
+                'incompleteDates' => $incompleteDates,
+            ],
+            'students' => $students
+        ]);
     }
 }

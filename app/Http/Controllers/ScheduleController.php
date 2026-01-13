@@ -13,7 +13,41 @@ class ScheduleController extends Controller
      */
     public function index()
     {
-        //
+
+        $teacherId = 1;
+        $dayName = 'Lunes'; // ejemplo: "martes"
+        // $teacherId = auth()->id(); // cuando uses auth
+
+        $schedules = Schedule::select('id', 'day', 'start_time', 'end_time', 'school_class_id')
+            ->where('day', $dayName)
+            ->whereHas('schoolClass', function ($q) use ($teacherId) {
+                $q->where('teacher_id', $teacherId);
+            })
+            ->with([
+                'schoolClass.subject:id,name',
+                'schoolClass.classGroup:id,name,grade_level_id',
+                'schoolClass.classGroup.gradeLevel:id,name',
+            ])
+            ->get();
+
+        $schedules = $schedules->map(function ($schedule) {
+            return [
+                'id'          => $schedule->id,
+                'day'         => $schedule->day,
+                'start_time'  => $schedule->start_time,
+                'end_time'    => $schedule->end_time,
+                'subject'     => $schedule->schoolClass->subject->name ?? null,
+                'group'       => $schedule->schoolClass->classGroup->name ?? null,
+                'grade_level' => $schedule->schoolClass->classGroup->gradeLevel->name ?? null,
+                'class_group_id' => $schedule->schoolClass->classGroup->id ?? null,
+            ];
+        });
+
+        return response()->json([
+            'status'    => "success",
+            'schedules' => $schedules,
+        ], 200);
+
     }
 
     /**

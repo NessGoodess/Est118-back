@@ -40,4 +40,9 @@ Route::get('/schedules', [ScheduleController::class, 'index']);
  * ___________________________________________________________________________
  */
 
-Route::post('/pre-enrollment', [PreEnrollmentController::class, 'store']);
+Route::post('/pre-enrollment', [PreEnrollmentController::class, 'store'])->middleware('throttle:10,1');
+
+Route::get('/public/folio/{folio}/pdf', [PreEnrollmentController::class, 'downloadPdf'])
+    ->name('folio.pdf')
+    ->middleware('signed'); 
+    

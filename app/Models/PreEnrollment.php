@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 class PreEnrollment extends Model
 {
@@ -11,8 +12,8 @@ class PreEnrollment extends Model
     use HasFactory;
 
     protected $fillable = [
-        'folio',
-        'status',
+        //'folio',
+        //'status',
         'contact_email',
         'first_name',
         'last_name',
@@ -52,12 +53,30 @@ class PreEnrollment extends Model
         'address_proof_path',
         'study_certificate_path',
         'photo_path',
-        'ip_address',
-        'user_agent',
     ];
 
     protected $casts = [
         'has_siblings' => 'boolean',
         'has_school_voucher' => 'boolean',
     ];
+
+    private static function generateFolio(): string
+    {
+        $year = now()->year;
+
+        return sprintf(
+            'PRE-EST118-%d-%s',
+            $year,
+            strtoupper(Str::random(8))
+        );
+    }
+
+    protected static function booted()
+    {
+        static::creating(function ($preEnrollment) {
+            if (empty($preEnrollment->folio)) {
+                $preEnrollment->folio = self::generateFolio();
+            }
+        });
+    }
 }

@@ -6,7 +6,9 @@ use App\Http\Controllers\PreEnrollmentController;
 use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TelegramController;
+use App\Mail\MyTestEmail;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum'])->get('/user', function (Request $request) {
@@ -23,7 +25,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 });
 
 Route::prefix('reader')->group(function () {
-    Route::post('/read-event', [NfcCredentialController::class, 'read']);
+    Route::post('/read-event', [NfcCredentialController::class, 'read'])
+        ->middleware(['auth:sanctum', 'service.token:service:nfc-reader']);
 });
 
 
@@ -44,5 +47,4 @@ Route::post('/pre-enrollment', [PreEnrollmentController::class, 'store'])->middl
 
 Route::get('/public/folio/{folio}/pdf', [PreEnrollmentController::class, 'downloadPdf'])
     ->name('folio.pdf')
-    ->middleware('signed'); 
-    
+    ->middleware('signed');

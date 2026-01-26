@@ -23,7 +23,6 @@ class StorePreEnrollmentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            //'folio' => 'required|string|unique:pre_enrollments,folio',
             'email.contactEmail' => 'required|email|max:100',
             'applicantInfo.firstName' => 'required|string|max:100',
             'applicantInfo.lastName' => 'required|string|max:100',
@@ -59,13 +58,46 @@ class StorePreEnrollmentRequest extends FormRequest
             'tuitionVoucher.hasSchoolVoucher' => 'required|boolean',
             'tuitionVoucher.schoolVoucherFolio' => 'exclude_if:tuitionVoucher.hasSchoolVoucher,false|required|string|max:100',
 
-            /*
-            'birth_certificate_path' => 'file|mimes:pdf,jpg,jpeg,png|max:2048',
-            'curp_document_path' => 'file|mimes:pdf,jpg,jpeg,png|max:2048',
-            'address_proof_path' => 'file|mimes:pdf,jpg,jpeg,png|max:2048',
-            'study_certificate_path' => 'file|mimes:pdf,jpg,jpeg,png|max:2048',
-            'photo_path' => 'file|mimes:pdf,jpg,jpeg,png|max:2048',
-            */
+        ];
+    }
+    //mensajes de validacion
+    public function messages(): array
+    {
+        return [
+            'email.contactEmail.required' => 'El correo electrónico es obligatorio.',
+            'applicantInfo.firstName.required' => 'El nombre es obligatorio.',
+            'applicantInfo.lastName.required' => 'El apellido es obligatorio.',
+            'applicantInfo.secondLastName.required' => 'El apellido materno es obligatorio.',
+            'applicantInfo.curp.required' => 'El CURP es obligatorio.',
+            'applicantInfo.birthDate.required' => 'La fecha de nacimiento es obligatoria.',
+            'applicantInfo.age.required' => 'La edad es obligatoria.',
+            'applicantInfo.gender.required' => 'El género es obligatorio.',
+            'applicantInfo.phone.required' => 'El teléfono es obligatorio.',
+            'applicantInfo.studentEmail.required' => 'El correo electrónico del estudiante es obligatorio.',
+            'applicantInfo.placeOfBirth.required' => 'El lugar de nacimiento es obligatorio.',
+            'academicInfo.previousSchool.required' => 'La escuela anterior es obligatoria.',
+            'academicInfo.currentAverage.required' => 'El promedio actual es obligatorio.',
+            'academicInfo.hasSiblings.required' => 'El campo de hermanos es obligatorio.',
+            'academicInfo.siblingsDetails.required_if' => 'El campo de detalles de hermanos es obligatorio si hay hermanos.',
+            'addressInfo.streetType.required' => 'El tipo de calle es obligatorio.',
+            'addressInfo.streetName.required' => 'El nombre de la calle es obligatorio.',
+            'addressInfo.houseNumber.required' => 'El número de la casa es obligatorio.',
+            'addressInfo.unitNumber.required' => 'El número de unidad es obligatorio.',
+            'addressInfo.neighborhoodType.required' => 'El tipo de vecindario es obligatorio.',
+            'addressInfo.neighborhoodName.required' => 'El nombre del vecindario es obligatorio.',
+            'addressInfo.postalCode.required' => 'El código postal es obligatorio.',
+            'addressInfo.city.required' => 'La ciudad es obligatoria.',
+            'addressInfo.state.required' => 'El estado es obligatorio.',
+            'guardianInfo.guardianFirstName.required' => 'El nombre del tutor es obligatorio.',
+            'guardianInfo.guardianLastName.required' => 'El apellido del tutor es obligatorio.',
+            'guardianInfo.guardianSecondLastName.required' => 'El apellido materno del tutor es obligatorio.',
+            'guardianInfo.guardianCurp.required' => 'El CURP del tutor es obligatorio.',
+            'guardianInfo.guardianPhone.required' => 'El teléfono del tutor es obligatorio.',
+            'guardianInfo.guardianRelationship.required' => 'La relación con el tutor es obligatoria.',
+            'workshopSelect.workshopFirstChoice.required' => 'El primer workshop es obligatorio.',
+            'workshopSelect.workshopSecondChoice.required' => 'El segundo workshop es obligatorio.',
+            'tuitionVoucher.hasSchoolVoucher.required' => 'El campo de voucher escolar es obligatorio.',
+            'tuitionVoucher.schoolVoucherFolio.required_if' => 'El folio del voucher escolar es obligatorio si hay voucher escolar.',
         ];
     }
 }

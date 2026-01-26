@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Models\Admission\AdmissionCycle;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
 class PreEnrollment extends Model
@@ -12,8 +14,7 @@ class PreEnrollment extends Model
     use HasFactory;
 
     protected $fillable = [
-        //'folio',
-        //'status',
+        'admission_cycle_id',
         'contact_email',
         'first_name',
         'last_name',
@@ -78,5 +79,15 @@ class PreEnrollment extends Model
                 $preEnrollment->folio = self::generateFolio();
             }
         });
+    }
+
+    /**
+     * Get the admission cycle that owns the PreEnrollment
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function admission_cycle(): BelongsTo
+    {
+        return $this->belongsTo(AdmissionCycle::class);
     }
 }

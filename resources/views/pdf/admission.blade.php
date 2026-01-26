@@ -356,8 +356,8 @@
             <table width="100%" cellspacing="0" cellpadding="0">
                 <tr>
                     <td width="120" align="center" valign="middle">
-                        <img src="file://{{ public_path('app/public/images/Logo_EST118.png') }}" class="logo"
-                            alt="Logo EST118">
+                        <img src="{{ public_path('images/Logo_EST118.png') }}">
+
                     </td>
                     <td valign="middle">
                         <div class="school-name">
@@ -435,7 +435,7 @@
         <div class="decoration-line"></div>
         <!-- Nota legal -->
         <div class="legal-note">
-            <strong>IMPORTANTE:</strong> Este documento es un comprobante oficial de preinscripción.
+            <strong>IMPORTANTE:</strong> Este documento es un comprobante.
             Debe ser presentado para completar el proceso de inscripción.
             El folio tiene validez únicamente para el ciclo escolar {{ date('Y') }}-{{ date('Y') + 1 }}.
         </div>
@@ -452,11 +452,6 @@
         <div class="footer">
             <div class="thanks">Agradecemos su preferencia y confianza</div>
             <div class="institution">Escuela Secundaria Técnica Núm. 118</div>
-        </div>
-
-        <!-- Info de generación -->
-        <div class="generation-info">
-            Folio: {{ $folio }} | Este es un documento oficial
         </div>
     </div>
 </body>

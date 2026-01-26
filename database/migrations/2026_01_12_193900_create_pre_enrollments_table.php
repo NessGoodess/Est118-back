@@ -14,6 +14,7 @@ return new class extends Migration
     {
         Schema::create('pre_enrollments', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('admission_cycle_id')->constrained('admission_cycles')->cascadeOnDelete();
 
             // --- Process Control ---
             $table->string('folio')->unique();

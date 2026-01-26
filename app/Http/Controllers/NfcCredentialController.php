@@ -38,7 +38,7 @@ class NfcCredentialController extends Controller
                     $payload = $this->handleUnknownEvent($payload);
             }
 
-            broadcast(new CredentialReadEvent($payload))->toOthers();
+            broadcast(new CredentialReadEvent($payload));
 
             return response()->json(['status' => 'ok', 'payload' => $payload]);
         } catch (\Throwable $e) {
@@ -50,13 +50,13 @@ class NfcCredentialController extends Controller
             broadcast(new CredentialReadEvent([
                 'event' => 'error',
                 'status' => 'error',
-                'message' => 'Error interno: ' . $e->getMessage(),
+                'message' => 'Error interno: '.$e->getMessage(),
                 'timestamp' => now()->toIso8601String(),
-            ]))->toOthers();
+            ]));
 
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
@@ -68,7 +68,7 @@ class NfcCredentialController extends Controller
     {
         $credentialId = $data['credential_id'] ?? null;
 
-        if (!$credentialId || $credentialId === 'Null') {
+        if (! $credentialId || $credentialId === 'Null') {
             return $payload + [
                 'event' => 'card_inserted',
                 'status' => 'warning',
@@ -80,12 +80,12 @@ class NfcCredentialController extends Controller
         $enrollment = Enrollment::with([
             'student',
             'student.profile',
-            'classGroup.gradeLevel'
+            'classGroup.gradeLevel',
         ])
-            ->whereHas('student', fn($q) => $q->where('credential_id', $credentialId))
+            ->whereHas('student', fn ($q) => $q->where('credential_id', $credentialId))
             ->first();
 
-        if (!$enrollment) {
+        if (! $enrollment) {
             return $payload + [
                 'event' => 'card_inserted',
                 'credential_id' => $credentialId,
@@ -106,7 +106,7 @@ class NfcCredentialController extends Controller
             'credential_id' => $credentialId,
             'status' => 'ok',
             'student' => $student,
-            'message' => 'Tarjeta reconocida correctamente.'
+            'message' => 'Tarjeta reconocida correctamente.',
         ];
     }
 
@@ -120,14 +120,14 @@ class NfcCredentialController extends Controller
         $photo = $enrollment->student->profile->profile_picture;
 
         $photoPath = ($grade && $group && $photo)
-            ? 'photos/students/' . rawurlencode($grade) . '/' . rawurlencode($group) . '/' . rawurlencode($photo)
+            ? 'photos/students/'.rawurlencode($grade).'/'.rawurlencode($group).'/'.rawurlencode($photo)
             : 'photos/students/default.png';
 
         return [
             'id' => $enrollment->id,
             'credential_id' => $enrollment->student->credential_id,
-            'name' => $enrollment->student->profile->first_name . ' ' . $enrollment->student->profile->last_name,
-            'photo_url' => asset("storage/{$photoPath}"),
+            'name' => $enrollment->student->profile->first_name.' '.$enrollment->student->profile->last_name,
+            'photo_url' => $photoPath,
             'grade' => $grade,
             'group' => $group,
             'registered_at' => now(),

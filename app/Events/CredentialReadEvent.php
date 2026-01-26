@@ -15,19 +15,15 @@ class CredentialReadEvent implements ShouldBroadcast
     /**
      * The queue connection to use for broadcasting.
      */
-    public string $connection = 'database';
-
-    /**
-     * The queue to use for broadcasting.
-     */
-    public string $queue = 'broadcasting';
+    public array $data;
 
     /**
      * Create a new event instance.
      */
-    public function __construct(
-        public array $data
-    ) {}
+    public function __construct(array $data)
+    {
+        $this->data = $data;
+    }
 
     /**
      * Get the channels the event should broadcast on.

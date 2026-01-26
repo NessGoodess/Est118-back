@@ -2,63 +2,77 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\ServiceAbility;
 use App\Models\User;
 use Illuminate\Console\Command;
 
 class CreateServiceToken extends Command
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
     protected $signature = 'service:create-token
-                            {--user= : ID of the service user}
-                            {--ability=service:nfc-reader : Token ability}
-                            {--name=service-token : Token name}
-                            {--revoke : Revoke previous tokens with the same name}';
+                            {--user= : ID or email of the service user}
+                            {--ability= : Token ability}
+                            {--name= : Token name}
+                            {--revoke : Revoke previous tokens with the same name}
+                            {--default : Create default NFC service token}';
 
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
     protected $description = 'Create a service token for external integrations (e.g., NFC reader)';
 
-    /**
-     * Execute the console command.
-     */
     public function handle(): int
     {
+        // --- Default Mode ---
+        if ($this->option('default')) {
+            $user = User::where('email', 'nfc-service@est118.edu.mx')->first();
+
+            if (!$user) {
+                $this->error('Default NFC service user not found. Run the ServiceUserSeeder first.');
+                return self::FAILURE;
+            }
+
+            $tokenName = 'nfc-reader';
+            $ability = ServiceAbility::NFC_READER->value;
+
+            // Revoke previous tokens automatically
+            $count = $user->tokens()->where('name', $tokenName)->delete();
+            $this->info("Revoked {$count} previous default token(s).");
+
+            $token = $user->createToken($tokenName, [$ability]);
+
+            $this->newLine();
+            $this->info('Default NFC token created successfully');
+            $this->line('<fg=green>' . $token->plainTextToken . '</>');
+            $this->newLine();
+            return self::SUCCESS;
+        }
+
+        // --- Normal Mode ---
         $userId = $this->option('user');
-        $ability = $this->option('ability');
-        $tokenName = $this->option('name');
+        $ability = $this->option('ability') ?? ServiceAbility::NFC_READER->value;
+        $tokenName = $this->option('name') ?? 'service-token';
 
         if (!$userId) {
-            $this->error('You must specify --user=ID');
+            $this->error('You must specify --user=ID or use --default');
             return self::FAILURE;
         }
 
-        $user = User::find($userId);
+        $user = User::where('id', $userId)
+                    ->orWhere('email', $userId)
+                    ->first();
 
         if (!$user) {
-            $this->error("User ID {$userId} not found");
+            $this->error("User {$userId} not found");
             return self::FAILURE;
         }
 
-        // Revoke previous tokens if requested
         if ($this->option('revoke')) {
             $count = $user->tokens()->where('name', $tokenName)->delete();
             $this->info("Revoked {$count} previous token(s) named '{$tokenName}'");
         }
 
-        // Create new token
         $token = $user->createToken($tokenName, [$ability]);
 
         $this->newLine();
-        $this->info('✅ Token created successfully');
+        $this->info('Token created successfully');
         $this->newLine();
-
         $this->table(['Property', 'Value'], [
             ['User', $user->name . ' (ID: ' . $user->id . ')'],
             ['Token Name', $tokenName],
@@ -66,13 +80,8 @@ class CreateServiceToken extends Command
         ]);
 
         $this->newLine();
-        $this->warn('⚠️  Save this token securely. It will not be shown again:');
-        $this->newLine();
+        $this->warn('Save this token securely. It will not be shown again:');
         $this->line('<fg=green>' . $token->plainTextToken . '</>');
-        $this->newLine();
-
-        $this->info('Usage in FastAPI:');
-        $this->line('  headers = {"Authorization": "Bearer ' . $token->plainTextToken . '"}');
         $this->newLine();
 
         return self::SUCCESS;

@@ -17,4 +17,8 @@ Broadcast::channel('public-chat', function () {
 // Only authenticated users can subscribe to this channel
 Broadcast::channel('credential-read-channel', function ($user) {
     return $user !== null;
+    
+    //users with role 'admin' or 'nfc-reader'
+    //return $user->can('nfc-reader');
+    //return $user->role === 'admin';
 });

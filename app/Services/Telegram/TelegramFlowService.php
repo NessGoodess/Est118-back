@@ -5,6 +5,7 @@ namespace App\Services\Telegram;
 use App\Enums\SessionStep;
 use App\Models\Guardian;
 use App\Models\TelegramSession;
+use Telegram\Bot\Laravel\Facades\Telegram;
 
 class TelegramFlowService
 {
@@ -15,6 +16,7 @@ class TelegramFlowService
 
     public function handle($update): void
     {
+        try{
         $chatId = $this->getChatId($update);
 
         $session = TelegramSession::firstOrCreate(
@@ -23,13 +25,17 @@ class TelegramFlowService
         );
 
         match ($session->step) {
-            SessionStep::START        => $this->start($session, $update),
-            SessionStep::SELECT_GRADE => $this->selectGrade($session, $update),
-            SessionStep::SELECT_GROUP => $this->selectGroup($session, $update),
-            SessionStep::ENTER_CURP   => $this->enterCurp($session, $update),
-            SessionStep::CONFIRM      => $this->confirmGuardian($session, $update),
-            SessionStep::COMPLETED    => $this->completed($chatId),
+            SessionStep::START      => $this->start($session, $update),
+            SessionStep::ENTER_CURP => $this->enterCurp($session, $update),
+            SessionStep::CONFIRM    => $this->confirmGuardian($session, $update),
+            SessionStep::COMPLETED  => $this->completed($session, $update),
         };
+    } catch (\Exception $e) {
+        Telegram::sendMessage([
+            'chat_id' => $chatId,
+            'text' => $e->getMessage(),
+        ]);
+    }
     }
 
     private function getChatId($update): int
@@ -44,58 +50,16 @@ class TelegramFlowService
     private function start(TelegramSession $session, $update): void
     {
         if ($update->getCallbackQuery()) {
-            $session->update(['step' => SessionStep::SELECT_GRADE]);
-            $this->messages->sendGrades($session->chat_id);
-            return;
+            $data = $update->getCallbackQuery()->getData();
+            
+            if ($data === 'begin' || $data === 'add_another') {
+                $session->update(['step' => SessionStep::ENTER_CURP]);
+                $this->messages->requestCurp($session->chat_id);
+                return;
+            }
         }
 
         $this->messages->welcome($session->chat_id);
-    }
-
-    private function selectGrade(TelegramSession $session, $update): void
-    {
-        if (!$update->getCallbackQuery()) {
-            $this->messages->requireButton($session->chat_id);
-            return;
-        }
-
-        $grade = $update->getCallbackQuery()->getData();
-
-        if (!$this->domain->isValidGrade($grade)) {
-            $this->messages->invalidOption($session->chat_id);
-            return;
-        }
-
-        $session->update([
-            'step'  => SessionStep::SELECT_GROUP,
-            'grade' => $grade
-        ]);
-
-        $this->messages->gradeSelected($session->chat_id, $grade);
-        $this->messages->sendGroups($session->chat_id);
-    }
-
-    private function selectGroup(TelegramSession $session, $update): void
-    {
-        if (!$update->getCallbackQuery()) {
-            $this->messages->requireButton($session->chat_id);
-            return;
-        }
-
-        $group = $update->getCallbackQuery()->getData();
-
-        if (!$this->domain->isValidGroup($group)) {
-            $this->messages->invalidOption($session->chat_id);
-            return;
-        }
-
-        $session->update([
-            'step'  => SessionStep::ENTER_CURP,
-            'group' => $group
-        ]);
-
-        $this->messages->groupSelected($session->chat_id, $group);
-        $this->messages->requestCurp($session->chat_id);
     }
 
     private function enterCurp(TelegramSession $session, $update): void
@@ -112,20 +76,12 @@ class TelegramFlowService
             return;
         }
 
-        $student = $this->domain->findStudent(
-            $session->grade,
-            $session->group,
-            $curp
-        );
+        $student = $this->domain->findStudentByCurp($curp);
 
         if (!$student) {
             $this->messages->studentNotFound($session->chat_id);
             return;
         }
-        /*if ($this->domain->studentAlreadyLinked($student)) {
-            $this->messages->studentAlreadyRegistered($chatId, $student, $session);
-            return;
-        }*/
 
         $relatedStudents = $this->domain->getOtherStudentsForTutor($student);
 
@@ -137,7 +93,6 @@ class TelegramFlowService
         $this->messages->showGuardians(
             $session->chat_id,
             $student,
-            $session,
             $relatedStudents
         );
     }
@@ -165,19 +120,36 @@ class TelegramFlowService
 
         $guardian = Guardian::find($guardianId);
 
-        if (!$guardian || $guardian->telegram_id) {
+        if (!$guardian) {
+            $this->messages->invalidOption($session->chat_id);
+            return;
+        }
+
+        // Si el tutor ya tiene telegram_id pero es diferente al actual
+        if ($guardian->telegram_id && $guardian->telegram_id !== $session->chat_id) {
             $this->messages->guardianAlreadyRegistered($session->chat_id);
             return;
         }
 
+        // Vincular o actualizar el telegram_id
         $guardian->update(['telegram_id' => $session->chat_id]);
         $session->update(['step' => SessionStep::COMPLETED]);
 
-        $this->messages->registrationSuccess($session->chat_id);
+        $this->messages->registrationSuccess($session->chat_id, $guardian);
     }
 
-    private function completed(int $chatId): void
+    private function completed(TelegramSession $session, $update): void
     {
-        $this->messages->completedMenu($chatId);
+        if ($update->getCallbackQuery()) {
+            $data = $update->getCallbackQuery()->getData();
+            
+            if ($data === 'add_another') {
+                $session->update(['step' => SessionStep::ENTER_CURP]);
+                $this->messages->requestCurp($session->chat_id);
+                return;
+            }
+        }
+
+        $this->messages->completedMenu($session->chat_id);
     }
 }

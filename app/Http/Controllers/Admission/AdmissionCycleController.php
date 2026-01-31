@@ -114,37 +114,23 @@ class AdmissionCycleController extends Controller
             ]);
         }
 
-        $now = now();
-
-        if ($now->lt($cycle->start_date)) {
-            return response()->json([
-                'enabled' => false,
-                'status' => 'not_started',
-                'start_date' => $cycle->start_date,
-                'end_date' => $cycle->end_date,
-                'message' => __('admissions.start_date', [
-                    'date' => $cycle->start_date->format('d/m/Y'),
-                ]),
-            ]);
-        }
-
-        if ($now->gt($cycle->end_date)) {
-            return response()->json([
-                'enabled' => false,
-                'status' => 'ended',
-                'start_date' => $cycle->start_date,
-                'end_date' => $cycle->end_date,
-                'message' => __('admissions.end_date'),
-            ]);
-        }
+        $status = $cycle->publicStatus();
 
         return response()->json([
-            'enabled' => true,
-            'status' => 'active',
+            'enabled' => $status === 'active',
+            'status' => $status,
             'cycle_id' => $cycle->id,
             'cycle_name' => $cycle->name,
-            'start_date' => $cycle->start_date,
-            'end_date' => $cycle->end_date,
+            'start_at' => $cycle->start_at,
+            'end_at' => $cycle->end_at,
+            'server_time' => now()->toDateTimeString(),
+            'message' => match ($status) {
+                'not_started' => __('admissions.start_date', [
+                    'date' => $cycle->start_at->format('d/m/Y H:i'),
+                ]),
+                'ended' => __('admissions.end_date'),
+                default => null,
+            },
         ]);
     }
 }

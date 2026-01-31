@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\AttendanceSource;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,12 +15,15 @@ class GeneralAttendance extends Model
         'student_id',
         'academic_year_id',
         'date',
-        'status', // present, late, absent
+        'scanned_at',
+        'status',
         'absence_request_id',
     ];
 
     protected $casts = [
         'date' => 'date',
+        'scanned_at' => 'datetime',
+        'source' => AttendanceSource::class,
     ];
 
     /**

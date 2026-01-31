@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AttendanceSource;
 use App\Events\CredentialReadEvent;
 use App\Jobs\SendTelegramNotificationJob;
 use App\Models\Enrollment;
+use App\Models\GeneralAttendance;
 use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -81,6 +83,7 @@ class NfcCredentialController extends Controller
             'student',
             'student.profile',
             'classGroup.gradeLevel',
+            'academicYear:id',
         ])
             ->whereHas('student', fn ($q) => $q->where('credential_id', $credentialId))
             ->first();
@@ -97,6 +100,15 @@ class NfcCredentialController extends Controller
 
         $student = $this->buildStudentData($enrollment);
         $registrationTime = now();
+
+        GeneralAttendance::create([
+            'student_id' => $enrollment->student_id,
+            'academic_year_id' => $enrollment->academicYear->id,
+            'date' => $registrationTime->toDateString(),
+            'scanned_at' => $registrationTime,
+            'status' => 'present',
+            'source' => AttendanceSource::NFC,
+        ]);
 
         // Dispatch Telegram notifications to guardians via queue
         $this->dispatchGuardianNotifications($enrollment, $student, $registrationTime);
@@ -117,7 +129,7 @@ class NfcCredentialController extends Controller
     {
         $grade = $enrollment->classGroup?->gradeLevel?->name;
         $group = $enrollment->classGroup?->name;
-        $photo = $enrollment->student->profile->profile_picture;
+        $photo = $enrollment->student->profile?->profile_picture;
 
         $photoPath = ($grade && $group && $photo)
             ? 'photos/students/'.rawurlencode($grade).'/'.rawurlencode($group).'/'.rawurlencode($photo)

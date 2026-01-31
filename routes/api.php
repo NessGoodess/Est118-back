@@ -8,6 +8,7 @@ use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TelegramController;
 use App\Enums\ServiceAbility;
+use App\Http\Controllers\GeneralAttendanceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -34,7 +35,10 @@ Route::prefix('reader')->group(function () {
         ]);
 });
 
-
+Route::prefix('attendance')->group(function () {
+    Route::get('/last-attendance', [GeneralAttendanceController::class, 'getLastAttendance']);
+    Route::get('/all-attendances', [GeneralAttendanceController::class, 'index']);
+});
 
 
 
@@ -54,18 +58,22 @@ Route::prefix('admissions')->group(function () {
     Route::get('/status', [AdmissionCycleController::class, 'status']);
 
     Route::post('/pre-enrollment', [PreEnrollmentController::class, 'store'])
-        ->middleware(['throttle:10,1', 'admissions.active']);
+        ->middleware(['throttle:5,1', 'admissions.active']);
 
     Route::get('/public/folio/{folio}/pdf', [PreEnrollmentController::class, 'downloadPdf'])
         ->name('folio.pdf')
         ->middleware('signed');
 
-    Route::middleware('auth:sanctum')->group(function () {
-        Route::get('/cycles', [AdmissionCycleController::class, 'index']);
-        Route::post('/cycles', [AdmissionCycleController::class, 'store']);
-        Route::patch('/cycles/{cycle}/activate', [AdmissionCycleController::class, 'activate']);
-        Route::patch('/cycles/{cycle}/close', [AdmissionCycleController::class, 'close']);
-    });
+    Route::prefix('cycles')->group(function () {
+        Route::get('/', [AdmissionCycleController::class, 'index']);
+        Route::post('/', [AdmissionCycleController::class, 'store']);
+        Route::patch('/{cycle}/activate', [AdmissionCycleController::class, 'activate']);
+        Route::patch('/{cycle}/close', [AdmissionCycleController::class, 'close']);
+    })->middleware('auth:sanctum');
+
+    Route::prefix('pre-enrollments')->group(function () {
+        Route::get('/', [PreEnrollmentController::class, 'index']);
+    })->middleware('auth:sanctum');
 });
 
 

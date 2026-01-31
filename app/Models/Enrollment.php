@@ -52,4 +52,10 @@ class Enrollment extends Model
     {
         return $this->classGroup->name ?? 'N/A';
     }
+
+    public function academicYear()
+{
+    return $this->belongsTo(AcademicYear::class);
+}
+
 }

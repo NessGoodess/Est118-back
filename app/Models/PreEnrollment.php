@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 
 class PreEnrollment extends Model
 {
@@ -61,30 +62,31 @@ class PreEnrollment extends Model
         'has_school_voucher' => 'boolean',
     ];
 
-    private static function generateFolio(): string
-    {
-        $year = now()->year;
-
-        return sprintf(
-            'PRE-EST118-%d-%s',
-            $year,
-            strtoupper(Str::random(8))
-        );
-    }
-
     protected static function booted()
     {
         static::creating(function ($preEnrollment) {
             if (empty($preEnrollment->folio)) {
-                $preEnrollment->folio = self::generateFolio();
+
+                // Traer el ciclo
+                $cycle = $preEnrollment->admission_cycle;
+                if (! $cycle) {
+                    throw new \Exception('El PreEnrollment debe pertenecer a un ciclo de admisión.');
+                }
+
+                DB::transaction(function () use ($preEnrollment, $cycle) {
+                    $cycle->last_folio_number++;
+                    $cycle->save();
+                    $preEnrollment->folio = sprintf(
+                        '%03d',
+                        $cycle->last_folio_number
+                    );
+                });
             }
         });
     }
 
     /**
      * Get the admission cycle that owns the PreEnrollment
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
      */
     public function admission_cycle(): BelongsTo
     {

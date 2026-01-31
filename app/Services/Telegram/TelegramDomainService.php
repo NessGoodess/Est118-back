@@ -6,16 +6,6 @@ use App\Models\Profile;
 
 class TelegramDomainService
 {
-    public function isValidGrade(string $grade): bool
-    {
-        return in_array($grade, ['1°', '2°', '3°']);
-    }
-
-    public function isValidGroup(string $group): bool
-    {
-        return in_array($group, range('A', 'H'));
-    }
-
     public function isValidCurp(string $curp): bool
     {
         return preg_match(
@@ -24,21 +14,18 @@ class TelegramDomainService
         ) === 1;
     }
 
-    public function findStudent(
-        string $grade,
-        string $group,
-        string $curp
-    ): ?Profile {
+    public function findStudentByCurp(string $curp): ?Profile
+    {
         return Profile::query()
             ->where('national_id', $curp)
             ->whereHas(
-                'student.enrollments.classGroup.gradeLevel',
-                fn($q) =>
-                $q->where('status', 'active')
-                    ->where('class_groups.name', $group)
-                    ->where('grade_levels.name', $grade)
+                'student.enrollments',
+                fn($q) => $q->where('status', 'active')
             )
-            ->with('student.guardians.profile')
+            ->with([
+                'student.guardians.profile',
+                'student.currentEnrollment.classGroup.gradeLevel'
+            ])
             ->first();
     }
 

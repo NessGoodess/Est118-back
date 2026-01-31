@@ -2,18 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\PreEnrollment;
 use App\Http\Requests\StorePreEnrollmentRequest;
 use App\Http\Requests\UpdatePreEnrollmentRequest;
+use App\Models\PreEnrollment;
 use App\Services\PreEnrollmentService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class PreEnrollmentController extends Controller
 {
-    /**
-     * Create a new controller instance.
-     */
     public function __construct(
         private PreEnrollmentService $preEnrollmentService
     ) {}
@@ -23,7 +20,24 @@ class PreEnrollmentController extends Controller
      */
     public function index()
     {
-        return PreEnrollment::orderBy('id', 'desc')->get();
+        return PreEnrollment::select([
+            'id',
+            'folio',
+            'first_name',
+            'last_name',
+            'second_last_name',
+            'curp',
+            'gender',
+            'age',
+            'guardian_first_name',
+            'guardian_last_name',
+            'guardian_second_last_name',
+            'guardian_phone',
+            'contact_email',
+            'created_at',
+        ])
+            ->orderByDesc('id')
+            ->paginate(3);
     }
 
     /**
@@ -52,40 +66,11 @@ class PreEnrollmentController extends Controller
     }
 
     /**
-     * Download the PDF for a pre-enrollment.
-     */
-    public function downloadPdf(string $folio)
-    {
-        $preEnrollment = PreEnrollment::where('folio', $folio)->firstOrFail();
-        $pdfPath = "pdf/admission/{$preEnrollment->folio}.pdf";
-
-        if (!Storage::disk('private')->exists($pdfPath)) {
-            return response()->json(['message' => 'PDF not found'], 404);
-        }
-
-        return response()->file(
-            Storage::disk('private')->path($pdfPath),
-            [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => "inline; filename=\"{$preEnrollment->folio}.pdf\"",
-            ]
-        );
-    }
-
-    /**
      * Display the specified resource.
      */
     public function show(PreEnrollment $preEnrollment)
     {
         return $preEnrollment;
-    }
-
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(PreEnrollment $preEnrollment)
-    {
-        //
     }
 
     /**
@@ -102,5 +87,26 @@ class PreEnrollmentController extends Controller
     public function destroy(PreEnrollment $preEnrollment)
     {
         //
+    }
+
+    /**
+     * Download the PDF for a pre-enrollment.
+     */
+    public function downloadPdf(string $folio)
+    {
+        $preEnrollment = PreEnrollment::where('folio', $folio)->firstOrFail();
+        $pdfPath = "pdf/admission/{$preEnrollment->folio}.pdf";
+
+        if (! Storage::disk('private')->exists($pdfPath)) {
+            return response()->json(['message' => 'PDF not found'], 404);
+        }
+
+        return response()->file(
+            Storage::disk('private')->path($pdfPath),
+            [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => "inline; filename=\"{$preEnrollment->folio}.pdf\"",
+            ]
+        );
     }
 }

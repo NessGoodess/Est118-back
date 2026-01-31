@@ -13,11 +13,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('admission_cycles', function (Blueprint $table) {
-            $table->id();
+            $table->id();  
             $table->string('name');
             $table->dateTime('start_at')->nullable();
             $table->dateTime('end_at')->nullable();
             $table->enum('status', AdmissionCycleStatus::cases())->default(AdmissionCycleStatus::DRAFT);
+            $table->unsignedSmallInteger('last_folio_number')->default(0);
             $table->foreignId('created_by')->constrained('users');
             $table->dateTime('closed_at')->nullable();
 

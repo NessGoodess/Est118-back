@@ -13,23 +13,9 @@ class EnsureAdmissionsAreActive
     {
         $cycle = AdmissionCycle::where('status', 'active')->first();
 
-        if (! $cycle) {
+        if (! $cycle || $cycle->publicStatus() !== 'active') {
             return response()->json([
                 'message' => __('admissions.not_available'),
-            ], 403);
-        }
-
-        $now = now();
-
-        if ($now->lt($cycle->start_date)) {
-            return response()->json([
-                'message' => __('admissions.not_started'),
-            ], 403);
-        }
-
-        if ($now->gt($cycle->end_date)) {
-            return response()->json([
-                'message' => __('admissions.ended'),
             ], 403);
         }
 

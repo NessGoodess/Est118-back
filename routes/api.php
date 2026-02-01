@@ -69,10 +69,12 @@ Route::prefix('admissions')->group(function () {
         Route::post('/', [AdmissionCycleController::class, 'store']);
         Route::patch('/{cycle}/activate', [AdmissionCycleController::class, 'activate']);
         Route::patch('/{cycle}/close', [AdmissionCycleController::class, 'close']);
+        Route::patch('/{cycle}/reopen', [AdmissionCycleController::class, 'reopen']);
     })->middleware('auth:sanctum');
 
     Route::prefix('pre-enrollments')->group(function () {
         Route::get('/', [PreEnrollmentController::class, 'index']);
+        Route::get('/{id}',[PreEnrollmentController::class, 'show']);
     })->middleware('auth:sanctum');
 });
 

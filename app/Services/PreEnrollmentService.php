@@ -3,10 +3,11 @@
 namespace App\Services;
 
 use App\Jobs\SendPreEnrollmentEmailJob;
+use App\Models\Admission\AdmissionCycle;
 use App\Models\PreEnrollment;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
 class PreEnrollmentService
@@ -14,7 +15,7 @@ class PreEnrollmentService
     /**
      * Creates a new pre-enrollment with its PDF and schedules the email.
      *
-     * @param array $data Validated request data
+     * @param  array  $data  Validated request data
      * @return array ['folio' => string, 'downloadUrl' => string]
      */
     public function createPreEnrollment(array $data): array
@@ -30,7 +31,7 @@ class PreEnrollmentService
 
         // 4. Calculate incremental delay to avoid Gmail rate limits
         $counter = Cache::increment('email_delay_counter');
-        $delaySeconds = min($counter * 20, 1800); //max 30 minutes
+        $delaySeconds = min($counter * 20, 1800); // max 30 minutes
 
         // 5. Dispatch email to queue with delay for asynchronous processing
         SendPreEnrollmentEmailJob::dispatch($preEnrollment, $pdfPath)
@@ -47,7 +48,57 @@ class PreEnrollmentService
      */
     private function storePreEnrollment(array $data): PreEnrollment
     {
+        $cycle = AdmissionCycle::public()->firstOrFail();
+
+        $data = $this->createData($data);
+
         return PreEnrollment::create([
+            ...$data,
+            'admission_cycle_id' => $cycle->id,
+        ]);
+
+    }
+
+    /**
+     * Generates the admission PDF and stores it in private storage.
+     */
+    private function generateAndStorePdf(PreEnrollment $preEnrollment): string
+    {
+        $logoBase64 = $this->imageToBase64(
+            storage_path('app/public/images/Logo_EST118.png')
+        );
+
+        $pdf = Pdf::loadView('pdf.admission', [
+            'folio' => $preEnrollment->folio,
+            'logoBase64' => $logoBase64,
+            'data' => (object) [
+                'studentName' => "{$preEnrollment->first_name} {$preEnrollment->last_name}",
+                'guardianName' => "{$preEnrollment->guardian_first_name} {$preEnrollment->guardian_last_name}",
+                'createdAt' => $preEnrollment->created_at->format('d/m/Y H:i'),
+            ],
+        ])->setPaper('letter');
+
+        $pdfPath = "pdf/admission/{$preEnrollment->folio}.pdf";
+        Storage::disk('private')->put($pdfPath, $pdf->output());
+
+        return $pdfPath;
+    }
+
+    /**
+     * Generates a signed temporary URL to download the PDF.
+     */
+    private function generateSignedUrl(string $folio): string
+    {
+        return URL::temporarySignedRoute(
+            'folio.pdf',
+            now()->addMinutes(5),
+            ['folio' => $folio]
+        );
+    }
+
+    private function createData(array $data): array
+    {
+        return [
             'contact_email' => $data['email']['contactEmail'],
             'first_name' => $data['applicantInfo']['firstName'],
             'last_name' => $data['applicantInfo']['lastName'],
@@ -84,38 +135,15 @@ class PreEnrollmentService
             'school_voucher_folio' => $data['tuitionVoucher']['hasSchoolVoucher']
                 ? $data['tuitionVoucher']['schoolVoucherFolio']
                 : '0',
-        ]);
+        ];
     }
 
-    /**
-     * Generates the admission PDF and stores it in private storage.
-     */
-    private function generateAndStorePdf(PreEnrollment $preEnrollment): string
+    private function imageToBase64(string $path, string $mime = 'png'): string
     {
-        $pdf = Pdf::loadView('pdf.admission', [
-            'folio' => $preEnrollment->folio,
-            'data' => (object) [
-                'studentName' => "{$preEnrollment->first_name} {$preEnrollment->last_name}",
-                'guardianName' => "{$preEnrollment->guardian_first_name} {$preEnrollment->guardian_last_name}",
-                'createdAt' => $preEnrollment->created_at->format('d/m/Y H:i'),
-            ]
-        ])->setPaper('letter');
+        if (! file_exists($path)) {
+            throw new \RuntimeException("Imagen no encontrada: {$path}");
+        }
 
-        $pdfPath = "pdf/admission/{$preEnrollment->folio}.pdf";
-        Storage::disk('private')->put($pdfPath, $pdf->output());
-
-        return $pdfPath;
-    }
-
-    /**
-     * Generates a signed temporary URL to download the PDF.
-     */
-    private function generateSignedUrl(string $folio): string
-    {
-        return URL::temporarySignedRoute(
-            'folio.pdf',
-            now()->addMinutes(5),
-            ['folio' => $folio]
-        );
+        return "data:image/{$mime};base64,".base64_encode(file_get_contents($path));
     }
 }

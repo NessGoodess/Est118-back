@@ -99,6 +99,40 @@ class AdmissionCycleController extends Controller
     }
 
     /**
+     * Reopen a closed admission cycle
+     */
+    public function reopen(AdmissionCycle $cycle)
+    {
+        if ($cycle->status !== AdmissionCycleStatus::CLOSED) {
+            return response()->json([
+                'message' => __('admissions.only_closed_can_be_reopened'),
+            ], 422);
+        }
+
+        DB::transaction(function () use ($cycle) {
+
+            $activeExists = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)
+                ->lockForUpdate()
+                ->exists();
+
+            if ($activeExists) {
+                throw ValidationException::withMessages([
+                    'status' => __('admissions.exist'),
+                ]);
+            }
+
+            $cycle->update([
+                'status' => AdmissionCycleStatus::ACTIVE,
+
+            ]);
+        });
+
+        return response()->json([
+            'message' => __('admissions.reopened_success'),
+        ]);
+    }
+
+    /**
      * Public admission status
      * This is the one that consumes the public frontend
      */

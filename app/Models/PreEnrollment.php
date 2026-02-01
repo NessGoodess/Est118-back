@@ -6,7 +6,6 @@ use App\Models\Admission\AdmissionCycle;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 
 class PreEnrollment extends Model
@@ -65,23 +64,26 @@ class PreEnrollment extends Model
     protected static function booted()
     {
         static::creating(function ($preEnrollment) {
-            if (empty($preEnrollment->folio)) {
 
-                // Traer el ciclo
-                $cycle = $preEnrollment->admission_cycle;
+            if ($preEnrollment->folio) {
+                return;
+            }
+
+            DB::transaction(function () use ($preEnrollment) {
+
+                $cycle = AdmissionCycle::where('id', $preEnrollment->admission_cycle_id)
+                    ->lockForUpdate()
+                    ->first();
+
                 if (! $cycle) {
                     throw new \Exception('El PreEnrollment debe pertenecer a un ciclo de admisión.');
                 }
 
-                DB::transaction(function () use ($preEnrollment, $cycle) {
-                    $cycle->last_folio_number++;
-                    $cycle->save();
-                    $preEnrollment->folio = sprintf(
-                        '%03d',
-                        $cycle->last_folio_number
-                    );
-                });
-            }
+                $cycle->increment('last_folio_number');
+
+                $preEnrollment->folio = sprintf('%03d', $cycle->last_folio_number);
+
+            });
         });
     }
 

@@ -28,13 +28,13 @@
         /* Marca de agua con logo */
         .watermark {
             position: fixed;
-            top: 120mm;
-            left: 55mm;
-            width: 100mm;
-            height: 100mm;
-            opacity: 0.05;
+            top: 10%;
+            left: 10%;
+            width: 80%;
+            opacity: 0.1;
             z-index: -1;
         }
+
 
         /* Container principal con borde */
         .document-container {
@@ -338,25 +338,21 @@
 </head>
 
 <body>
-    <!-- Marca de agua -->
     <div class="watermark">
-        <img src="file://{{ public_path('images/Logo_EST118.png') }}" alt="Marca de agua"
-            style="width: 100%; height: 100%; opacity: 0.3;">
+        <img src="{{ $logoBase64 }}" style="width:100%">
     </div>
-
-    <!-- Decoraciones de esquina -->
     <div class="corner-decoration top-left"></div>
     <div class="corner-decoration top-right"></div>
     <div class="corner-decoration bottom-left"></div>
     <div class="corner-decoration bottom-right"></div>
 
     <div class="document-container">
-        <!-- Header -->
+
         <div class="header">
             <table width="100%" cellspacing="0" cellpadding="0">
                 <tr>
-                    <td width="120" align="center" valign="middle">
-                        <img src="{{ public_path('images/Logo_EST118.png') }}">
+                    <td width="80" align="center" valign="middle">
+                        <img src="{{ $logoBase64 }}" width="50">
 
                     </td>
                     <td valign="middle">
@@ -368,7 +364,6 @@
             </table>
         </div>
 
-        <!-- Sección de saludo -->
         <div class="greeting-section">
             <div class="greeting-line">
                 Estimado(a) <span class="recipient-name">{{ strtoupper($data->guardianName) }}</span>
@@ -378,7 +373,6 @@
             </div>
         </div>
 
-        <!-- Mensaje principal -->
         <div class="main-message">
             <p>
                 Está a un paso de concluir el trámite de preinscripción, el número asignado para la preinscripción del
@@ -386,7 +380,6 @@
             </p>
         </div>
 
-        <!-- Folio destacado -->
         <div class="folio-box">
             <div class="folio-label">FOLIO DE PREINSCRIPCIÓN</div>
             <div class="folio-number">{{ $folio }}</div>
@@ -394,7 +387,6 @@
         </div>
 
 
-        <!-- Tabla de información -->
         <table class="info-table">
             <tr>
                 <td class="label-col">Aspirante:</td>
@@ -410,7 +402,6 @@
             </tr>
         </table>
 
-        <!-- Siguiente paso -->
         <div class="next-steps-section">
             <div class="next-steps-title">Siguiente Paso</div>
             <div class="instructions">
@@ -424,7 +415,6 @@
             </div>
         </div>
 
-        <!-- Horario -->
         <div class="schedule-box">
             <p>
                 <strong>Horario de Atención en Contraloría:</strong><br>
@@ -440,15 +430,6 @@
             El folio tiene validez únicamente para el ciclo escolar {{ date('Y') }}-{{ date('Y') + 1 }}.
         </div>
 
-        <!-- QR Code (opcional) -->
-        <!-- <div class="qr-section">
-            <div class="qr-box">
-                <img src="{{ public_path('qrcodes/' . $folio . '.png') }}" style="width: 100px; height: 100px;" alt="QR Code">
-            </div>
-            <div class="qr-label">Escanea para verificar autenticidad</div>
-        </div> -->
-
-        <!-- Footer -->
         <div class="footer">
             <div class="thanks">Agradecemos su preferencia y confianza</div>
             <div class="institution">Escuela Secundaria Técnica Núm. 118</div>

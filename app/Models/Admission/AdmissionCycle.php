@@ -2,11 +2,11 @@
 
 namespace App\Models\Admission;
 
+use App\Enums\AdmissionCycleStatus;
 use App\Models\PreEnrollment;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use App\Enums\AdmissionCycleStatus;
 
 class AdmissionCycle extends Model
 {
@@ -35,6 +35,9 @@ class AdmissionCycle extends Model
         return $this->hasMany(PreEnrollment::class);
     }
 
+    /**
+     * Get the public status of the admission cycle.
+     */
     public function publicStatus(): string
     {
         $now = now();
@@ -52,5 +55,16 @@ class AdmissionCycle extends Model
         }
 
         return 'active';
+    }
+
+    /**
+     * Scope a query to only include active admission cycles.
+     */
+    public function scopePublic($query)
+    {
+        return $query
+            ->where('status', AdmissionCycleStatus::ACTIVE)
+            ->where('start_at', '<=', now())
+            ->where('end_at', '>=', now());
     }
 }

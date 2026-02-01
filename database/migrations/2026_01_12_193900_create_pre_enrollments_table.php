@@ -17,7 +17,7 @@ return new class extends Migration
             $table->foreignId('admission_cycle_id')->constrained('admission_cycles')->cascadeOnDelete();
 
             // --- Process Control ---
-            $table->string('folio')->unique();
+            $table->string('folio');
             $table->enum('status', PreEnrollmentStatus::cases())->default(PreEnrollmentStatus::PENDING);
 
             // --- email ---
@@ -80,6 +80,8 @@ return new class extends Migration
             $table->string('user_agent')->nullable();
 
             $table->timestamps();
+
+            $table->unique(['admission_cycle_id', 'folio']);
         });
     }
 

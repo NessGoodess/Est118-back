@@ -20,6 +20,11 @@ return [
 
     'not_started' => 'Las preinscripciones aún no han iniciado',
      'ended' => 'Las preinscripciones han finalizado',
+
+     'only_closed_can_be_reopened' => 'Solo se puede reabrir una temporada cerrada',
+     'reopened_success' => 'Temporada reabierta correctamente',
+
+     
 ];
 
 

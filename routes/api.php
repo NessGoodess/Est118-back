@@ -70,11 +70,12 @@ Route::prefix('admissions')->group(function () {
         Route::patch('/{cycle}/activate', [AdmissionCycleController::class, 'activate']);
         Route::patch('/{cycle}/close', [AdmissionCycleController::class, 'close']);
         Route::patch('/{cycle}/reopen', [AdmissionCycleController::class, 'reopen']);
+        Route::delete('/{cycle}', [AdmissionCycleController::class, 'destroy']);
     })->middleware('auth:sanctum');
 
     Route::prefix('pre-enrollments')->group(function () {
         Route::get('/', [PreEnrollmentController::class, 'index']);
-        Route::get('/{id}',[PreEnrollmentController::class, 'show']);
+        Route::get('/{preEnrollment}',[PreEnrollmentController::class, 'show']);
     })->middleware('auth:sanctum');
 });
 

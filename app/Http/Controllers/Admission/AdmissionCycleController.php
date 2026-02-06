@@ -100,8 +100,9 @@ class AdmissionCycleController extends Controller
 
     /**
      * Reopen a closed admission cycle
+     * Optionally extend the end date if the cycle has expired
      */
-    public function reopen(AdmissionCycle $cycle)
+    public function reopen(AdmissionCycle $cycle, \App\Http\Requests\Admission\ReopenAdmissionCycleRequest $request)
     {
         if ($cycle->status !== AdmissionCycleStatus::CLOSED) {
             return response()->json([
@@ -109,7 +110,7 @@ class AdmissionCycleController extends Controller
             ], 422);
         }
 
-        DB::transaction(function () use ($cycle) {
+        DB::transaction(function () use ($cycle, $request) {
 
             $activeExists = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)
                 ->lockForUpdate()
@@ -121,14 +122,39 @@ class AdmissionCycleController extends Controller
                 ]);
             }
 
-            $cycle->update([
+            $updateData = [
                 'status' => AdmissionCycleStatus::ACTIVE,
+            ];
 
-            ]);
+            // If a new end date is provided, update it
+            if ($request->has('end_at')) {
+                $updateData['end_at'] = $request->input('end_at');
+            }
+
+            $cycle->update($updateData);
         });
 
         return response()->json([
             'message' => __('admissions.reopened_success'),
+        ]);
+    }
+
+    /**
+     * Delete a draft admission cycle
+     * Only cycles that have never been activated can be deleted
+     */
+    public function destroy(AdmissionCycle $cycle)
+    {
+        if ($cycle->status !== AdmissionCycleStatus::DRAFT) {
+            return response()->json([
+                'message' => 'Solo se pueden eliminar ciclos en borrador que nunca han sido activados.',
+            ], 422);
+        }
+
+        $cycle->delete();
+
+        return response()->json([
+            'message' => 'Ciclo eliminado correctamente.',
         ]);
     }
 

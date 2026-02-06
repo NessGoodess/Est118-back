@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StorePreEnrollmentRequest;
 use App\Http\Requests\UpdatePreEnrollmentRequest;
+use App\Http\Resources\PreEnrollmentListResource;
 use App\Models\Admission\AdmissionCycle;
 use App\Models\PreEnrollment;
 use App\Services\PreEnrollmentService;
@@ -21,26 +22,12 @@ class PreEnrollmentController extends Controller
      */
     public function index()
     {
-        //retornar los que tiene el mas reciente ciclo
         $latestCycle = AdmissionCycle::latest()->first();
-        return PreEnrollment::where('admission_cycle_id', $latestCycle->id)->select([
-            'id',
-            'folio',
-            'first_name',
-            'last_name',
-            'second_last_name',
-            'curp',
-            'gender',
-            'age',
-            'guardian_first_name',
-            'guardian_last_name',
-            'guardian_second_last_name',
-            'guardian_phone',
-            'contact_email',
-            'created_at',
-        ])
-            ->orderByDesc('id')
-            ->paginate(25);
+        return PreEnrollmentListResource::collection(
+            PreEnrollment::where('admission_cycle_id', $latestCycle->id)
+                ->orderByDesc('id')
+                ->paginate(100)
+        );
     }
 
     /**
@@ -73,8 +60,6 @@ class PreEnrollmentController extends Controller
      */
     public function show(PreEnrollment $preEnrollment)
     {
-        $preEnrollment = PreEnrollment::all()->where('id', $preEnrollment->id)->first();
-
         return $preEnrollment;
     }
 

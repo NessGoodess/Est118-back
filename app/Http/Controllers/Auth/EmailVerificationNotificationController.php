@@ -20,6 +20,9 @@ class EmailVerificationNotificationController extends Controller
 
         $request->user()->sendEmailVerificationNotification();
 
-        return response()->json(['status' => 'verification-link-sent']);
+        return response()->json([
+            'status' => 'verification-link-sent',
+            'message' => __('auth.verification-link-sent'),
+        ], 200);
     }
 }

@@ -6,12 +6,25 @@ use App\Enums\AdmissionCycleStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admission\StoreAdmissionCycleRequest;
 use App\Models\Admission\AdmissionCycle;
+use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
-class AdmissionCycleController extends Controller
+class AdmissionCycleController extends Controller implements HasMiddleware
 {
+    public function __construct() {}
+
+    public static function middleware(): array
+    {
+        return [
+            // Protect all routes except public status endpoint
+            new Middleware('permission:manage admission cycles')
+                ->except(['status']),
+        ];
+    }
+
     /**
      * Seasons list
      */
@@ -68,6 +81,9 @@ class AdmissionCycleController extends Controller
                 ]);
             }
 
+            // Synchronize folio counter to prevent duplicates before activating
+            $cycle->synchronizeFolioCounter();
+
             $cycle->update([
                 'status' => AdmissionCycleStatus::ACTIVE,
             ]);
@@ -122,6 +138,9 @@ class AdmissionCycleController extends Controller
                 ]);
             }
 
+            // Synchronize folio counter to prevent duplicates before reopening
+            $cycle->synchronizeFolioCounter();
+
             $updateData = [
                 'status' => AdmissionCycleStatus::ACTIVE,
             ];
@@ -147,14 +166,14 @@ class AdmissionCycleController extends Controller
     {
         if ($cycle->status !== AdmissionCycleStatus::DRAFT) {
             return response()->json([
-                'message' => 'Solo se pueden eliminar ciclos en borrador que nunca han sido activados.',
+                'message' => __('admissions.not_deleted'),
             ], 422);
         }
 
         $cycle->delete();
 
         return response()->json([
-            'message' => 'Ciclo eliminado correctamente.',
+            'message' => _('admissions.deleted_success'),
         ]);
     }
 

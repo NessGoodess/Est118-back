@@ -10,13 +10,14 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             line-height: 1.6;
             color: #333;
-            max-width: 600px;
             margin: 0 auto;
             padding: 20px;
             background-color: #f5f5f5;
         }
 
         .container {
+            max-width: 500px;
+            margin: 0 auto;
             background-color: #ffffff;
             border-radius: 8px;
             padding: 30px;
@@ -25,19 +26,19 @@
 
         .header {
             text-align: center;
-            border-bottom: 2px solid #1a5f7a;
+            border-bottom: 2px solid #2d469b;
             padding-bottom: 20px;
             margin-bottom: 20px;
         }
 
         .header h1 {
-            color: #1a5f7a;
+            color: #2d469b;
             margin: 0;
             font-size: 24px;
         }
 
         .folio-badge {
-            background-color: #1a5f7a;
+            background-color: #2d469b;
             color: white;
             padding: 10px 20px;
             border-radius: 5px;
@@ -53,7 +54,7 @@
 
         .info-section {
             background-color: #f8f9fa;
-            border-left: 4px solid #1a5f7a;
+            border-left: 4px solid #2d469b;
             padding: 15px;
             margin: 15px 0;
             border-radius: 0 5px 5px 0;
@@ -61,18 +62,18 @@
 
         .info-section h3 {
             margin: 0 0 10px 0;
-            color: #1a5f7a;
+            color: #2d469b;
         }
 
         .next-steps {
-            background-color: #e8f4f8;
+            background-color: rgba(136, 188, 255, 0.226);
             padding: 15px;
             border-radius: 5px;
             margin: 20px 0;
         }
 
         .next-steps h3 {
-            color: #1a5f7a;
+            color: #2d469b;
             margin-top: 0;
         }
 
@@ -86,17 +87,19 @@
         }
 
         .footer {
+            background-color: rgba(231, 231, 231, 0.26);
             text-align: center;
             margin-top: 30px;
-            padding-top: 20px;
+            padding-top: 10px;
+            padding-bottom: 10px;
             border-top: 1px solid #ddd;
             color: #666;
-            font-size: 14px;
+            font-size: 11px;
         }
 
         .warning {
-            background-color: #fff3cd;
-            border: 1px solid #ffc107;
+            background-color: rgba(243, 225, 164, 0.1);
+            border: 1px solid #ffd453;
             padding: 15px;
             border-radius: 5px;
             margin: 15px 0;
@@ -111,44 +114,44 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>¡Preinscripción Registrada!</h1>
-            <p>Escuela Secundaria Técnica No. 118</p>
+            <h1>{{ __('emails.pre_enrollment.header.title') }}</h1>
+            <p>{{ __('emails.pre_enrollment.header.school') }}</p>
         </div>
 
         <div class="content">
-            <p>Estimado(a) <strong>{{ $preEnrollment->guardian_first_name }} {{ $preEnrollment->guardian_last_name }}</strong>,</p>
+            <p>{{ __('emails.pre_enrollment.greeting', ['name' => $preEnrollment->guardian_first_name . ' ' . $preEnrollment->guardian_last_name]) }}</p>
 
-            <p>Le confirmamos que hemos recibido exitosamente la solicitud de preinscripción para:</p>
+            <p>{{ __('emails.pre_enrollment.intro') }}</p>
 
             <div class="info-section">
-                <h3>Datos del Estudiante</h3>
-                <p><strong>Nombre:</strong> {{ $preEnrollment->first_name }} {{ $preEnrollment->last_name }} {{ $preEnrollment->second_last_name }}</p>
-                <p><strong>CURP:</strong> {{ $preEnrollment->curp }}</p>
+                <h3>{{ __('emails.pre_enrollment.student_data.title') }}</h3>
+                <p><strong>{{ __('emails.pre_enrollment.student_data.name') }}:</strong> {{ $preEnrollment->first_name }} {{ $preEnrollment->last_name }} {{ $preEnrollment->second_last_name }}</p>
+                <p><strong>{{ __('emails.pre_enrollment.student_data.curp') }}:</strong> {{ $preEnrollment->curp }}</p>
             </div>
 
             <div style="text-align: center;">
-                <p>Su número de folio es:</p>
+                <p>{{ __('emails.pre_enrollment.folio.label') }}</p>
                 <div class="folio-badge">{{ $preEnrollment->folio }}</div>
             </div>
 
             <div class="warning">
-                <strong>Importante:</strong> Guarde este folio, ya que lo necesitará para dar seguimiento a su solicitud y completar el proceso de inscripción.
+                <strong>{{ __('emails.pre_enrollment.warning.title') }}</strong> {{ __('emails.pre_enrollment.warning.content') }}
             </div>
 
             <div class="next-steps">
-                <h3>Próximos Pasos</h3>
+                <h3>{{ __('emails.pre_enrollment.next_steps.title') }}</h3>
                 <ol>
-                    <li>Conserve el comprobante PDF adjunto a este correo</li>
-                    <li>Espere la confirmación de aceptación por parte de la escuela</li>
-                    <li>Una vez aceptado, complete el proceso de inscripción presentando la documentación requerida</li>
+                    <li>{{ __('emails.pre_enrollment.next_steps.steps.0') }}</li>
+                    <li>{{ __('emails.pre_enrollment.next_steps.steps.1') }}</li>
+                    <li>{{ __('emails.pre_enrollment.next_steps.steps.2') }}</li>
                 </ol>
             </div>
         </div>
 
         <div class="footer">
-            <p>Este es un correo automático, por favor no responda a este mensaje.</p>
-            <p>Si tiene alguna duda, comuníquese a nuestras oficinas.</p>
-            <p>&copy; {{ date('Y') }} Escuela Secundaria Técnica No. 118</p>
+            <p>{{ __('emails.pre_enrollment.footer.auto') }}</p>
+            <p>{{ __('emails.pre_enrollment.footer.contact') }}</p>
+            <p>&copy; {{ date('Y') }} {{ __('emails.pre_enrollment.header.school') }} </p>
         </div>
     </div>
 </body>

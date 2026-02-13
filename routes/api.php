@@ -1,5 +1,5 @@
 <?php
-
+//controllers
 use App\Http\Controllers\Admission\AdmissionCycleController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\NfcCredentialController;
@@ -7,16 +7,40 @@ use App\Http\Controllers\PreEnrollmentController;
 use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TelegramController;
-use App\Enums\ServiceAbility;
+use App\Http\Controllers\Auth\ChangePasswordController;
 use App\Http\Controllers\GeneralAttendanceController;
+use App\Http\Controllers\UserController;
+//enums
+use App\Enums\ServiceAbility;
+//resources
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Resources\UserResource;
 
-Route::middleware(['auth:sanctum'])->get('/user', function (Request $request) {
-    return $request->user();
+/**
+ * Routes
+ * ___________________________________________________________________________
+ */
+Route::middleware(['auth:sanctum', 'verified'])->get('/user', function (Request $request) {
+    $user = $request->user();
+    $user->load('roles.permissions', 'permissions');
+    
+    return new UserResource($user);
 });
 
-Route::group(['middleware' => ['auth:sanctum']], function () {
+/**
+ * Current User
+ * ___________________________________________________________________________
+ */
+Route::prefix('current-user')->group(function () {
+    Route::post('/change-password', [ChangePasswordController::class, 'changePassword']);
+})->middleware('auth:sanctum', 'verified');
+
+/**
+ * Attendance
+ * ___________________________________________________________________________
+ */
+Route::group(['middleware' => ['auth:sanctum', 'verified']], function () {
     Route::get('/all-students', [StudentController::class, 'index']);
     Route::get('/class/{schoolClassId}/date/{date}', [AttendanceController::class, 'getClassAttendance']);
     Route::get('/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
@@ -25,8 +49,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('/report/student/{studentId}', [AttendanceController::class, 'getStudentReport']);
 });
 
-
-
+/**
+ * NFC Reader
+ * ___________________________________________________________________________
+ */
 Route::prefix('reader')->group(function () {
     Route::post('/read-event', [NfcCredentialController::class, 'read'])
         ->middleware([
@@ -35,6 +61,10 @@ Route::prefix('reader')->group(function () {
         ]);
 });
 
+/**
+ * Attendance
+ * ___________________________________________________________________________
+ */
 Route::prefix('attendance')->group(function () {
     Route::get('/last-attendance', [GeneralAttendanceController::class, 'getLastAttendance']);
     Route::get('/all-attendances', [GeneralAttendanceController::class, 'index']);
@@ -48,7 +78,6 @@ Route::get('/schedules', [ScheduleController::class, 'index']);
 
 
 /**
- * ___________________________________________________________________________
  * Admission Settings Routes
  * ___________________________________________________________________________
  */
@@ -71,12 +100,45 @@ Route::prefix('admissions')->group(function () {
         Route::patch('/{cycle}/close', [AdmissionCycleController::class, 'close']);
         Route::patch('/{cycle}/reopen', [AdmissionCycleController::class, 'reopen']);
         Route::delete('/{cycle}', [AdmissionCycleController::class, 'destroy']);
-    })->middleware('auth:sanctum');
+    })->middleware('auth:sanctum', 'verified');
 
     Route::prefix('pre-enrollments')->group(function () {
         Route::get('/', [PreEnrollmentController::class, 'index']);
         Route::get('/{preEnrollment}',[PreEnrollmentController::class, 'show']);
-    })->middleware('auth:sanctum');
+    })->middleware('auth:sanctum', 'verified');
+});
+
+/**
+ * User Management Routes
+ * ___________________________________________________________________________
+ */
+Route::prefix('users')->middleware('auth:sanctum', 'verified')->group(function () {
+    Route::get('/', [UserController::class, 'index'])
+        ->middleware('permission:view users');
+    
+    Route::get('/{user}', [UserController::class, 'show'])
+        ->middleware('permission:view users');
+    
+    Route::patch('/{user}', [UserController::class, 'update'])
+        ->middleware('permission:edit users');
+    
+    Route::delete('/{user}', [UserController::class, 'destroy'])
+        ->middleware('permission:delete users');
+    
+    Route::post('/{user}/change-password', [UserController::class, 'changePassword'])
+        ->middleware('permission:edit users');
+    
+    Route::post('/{user}/resend-verification', [UserController::class, 'resendVerification'])
+        ->middleware('permission:edit users');
+});
+
+/**
+ * Roles and Permissions
+ * ___________________________________________________________________________
+ */
+Route::middleware('auth:sanctum', 'verified')->group(function () {
+    Route::get('/roles', [UserController::class, 'roles']);
+    Route::get('/permissions', [UserController::class, 'permissions']);
 });
 
 

@@ -8,14 +8,24 @@ use App\Http\Resources\PreEnrollmentListResource;
 use App\Models\Admission\AdmissionCycle;
 use App\Models\PreEnrollment;
 use App\Services\PreEnrollmentService;
+use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
-class PreEnrollmentController extends Controller
+
+class PreEnrollmentController extends Controller implements HasMiddleware
 {
     public function __construct(
         private PreEnrollmentService $preEnrollmentService
     ) {}
+
+    public static function middleware(): array
+    {
+        return [
+            new Middleware('permission:view pre-enrollments')->only(['index', 'show']),
+        ];
+    }
 
     /**
      * Display a listing of the resource.
@@ -41,7 +51,7 @@ class PreEnrollmentController extends Controller
             return response()->json([
                 'folio' => $result['folio'],
                 'downloadUrl' => $result['downloadUrl'],
-                'message' => 'Preinscripción creada exitosamente',
+                'message' => __('admissions.created_success'),
             ], 201);
         } catch (\Exception $e) {
             Log::error('Error al crear preinscripción', [
@@ -50,7 +60,7 @@ class PreEnrollmentController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Ocurrió un error al procesar su preinscripción. Intente nuevamente más tarde.',
+                'message' => __('admissions.error_processing'),
             ], 500);
         }
     }

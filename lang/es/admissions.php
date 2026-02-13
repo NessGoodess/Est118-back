@@ -24,7 +24,9 @@ return [
      'only_closed_can_be_reopened' => 'Solo se puede reabrir una temporada cerrada',
      'reopened_success' => 'Temporada reabierta correctamente',
 
-     
+     'not_deleted' => 'Solo se pueden eliminar ciclos en borrador que nunca han sido activados',
+     'deleted_success' => 'Ciclo eliminado correctamente',
+
+     'error_processing' => 'Ocurrió un error al procesar su preinscripción. Intente nuevamente más tarde o porfavor comuníquese con la institución.',
+     'created_success' => 'Preinscripción creada exitosamente',
 ];
-
-

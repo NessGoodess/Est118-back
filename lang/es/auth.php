@@ -17,5 +17,11 @@ return [
     'failed' => 'Credenciales Inválidas.',
     'password' => 'Credenciales Inválidas.',
     'throttle' => 'Demasiados intentos de inicio de sesión. Por favor intenta de nuevo en :seconds segundos.',
+    'create-user' => 'Usuario creado exitosamente',
+    'verification-link-sent' => 'Correo de verificación enviado',
+
+    'current_password_incorrect' => 'Contraseña actual incorrecta',
+    'password_updated' => 'Contraseña actualizada exitosamente',
+    
 
 ];

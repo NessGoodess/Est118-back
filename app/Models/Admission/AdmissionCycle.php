@@ -67,4 +67,24 @@ class AdmissionCycle extends Model
             ->where('start_at', '<=', now())
             ->where('end_at', '>=', now());
     }
+    /**
+     * Synchronize the last_folio_number with the actual maximum folio in pre_enrollments.
+     * This prevents unique constraint violations when a cycle is reopened or modified.
+     */
+    public function synchronizeFolioCounter(): void
+    {
+        // Get the maximum folio from pre_enrollments for this cycle
+        // We cast to integer to ensure correct numerical comparison
+        $maxFolio =(int) $this->preenrollments()
+            ->selectRaw('MAX(CAST(folio AS UNSIGNED)) as max_folio')
+            ->value('max_folio');
+
+        $maxFolio = (int) $maxFolio;
+
+        // Only update if the actual existing folio is greater than the tracker
+        if ($maxFolio > (int) $this->last_folio_number) {
+            $this->last_folio_number = $maxFolio;
+            $this->save();
+        }
+    }
 }

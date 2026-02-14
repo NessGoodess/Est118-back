@@ -45,7 +45,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         return PreEnrollmentListResource::collection(
             PreEnrollment::where('admission_cycle_id', $activeCycle->id)
                 ->orderByDesc('id')
-                ->paginate(100)
+                ->paginate(300)
         );
     }
 

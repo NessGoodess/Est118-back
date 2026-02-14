@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AdmissionCycleStatus;
 use App\Http\Requests\StorePreEnrollmentRequest;
 use App\Http\Requests\UpdatePreEnrollmentRequest;
 use App\Http\Resources\PreEnrollmentListResource;
@@ -32,9 +33,17 @@ class PreEnrollmentController extends Controller implements HasMiddleware
      */
     public function index()
     {
-        $latestCycle = AdmissionCycle::latest()->first();
+        $activeCycle = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)->first();
+
+        if(!$activeCycle){
+            return response()->json([
+                'status' => 'Not Found',
+                'message' => __('admissions.no_active_cycle'),
+            ], 404);
+        }
+
         return PreEnrollmentListResource::collection(
-            PreEnrollment::where('admission_cycle_id', $latestCycle->id)
+            PreEnrollment::where('admission_cycle_id', $activeCycle->id)
                 ->orderByDesc('id')
                 ->paginate(100)
         );

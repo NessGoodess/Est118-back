@@ -29,4 +29,6 @@ return [
 
      'error_processing' => 'Ocurrió un error al procesar su preinscripción. Intente nuevamente más tarde o porfavor comuníquese con la institución.',
      'created_success' => 'Preinscripción creada exitosamente',
+
+     'no_active_cycle' => 'No hay un ciclo activo',
 ];

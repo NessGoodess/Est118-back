@@ -22,3 +22,8 @@ public/storage
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+**/dataseeder/
+database/seeders/test/
+app/Console/Commands/GenerateSeederFromCsv.php
+

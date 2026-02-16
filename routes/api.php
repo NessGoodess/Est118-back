@@ -12,6 +12,7 @@ use App\Http\Controllers\GeneralAttendanceController;
 use App\Http\Controllers\UserController;
 //enums
 use App\Enums\ServiceAbility;
+use App\Http\Controllers\students\GradeLevelController;
 //resources
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -139,6 +140,37 @@ Route::prefix('users')->middleware('auth:sanctum', 'verified')->group(function (
 Route::middleware('auth:sanctum', 'verified')->group(function () {
     Route::get('/roles', [UserController::class, 'roles']);
     Route::get('/permissions', [UserController::class, 'permissions']);
+});
+
+
+/**
+ * student management
+*/
+Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(function () {
+
+    Route::get('/grades', [GradeLevelController::class, 'index']);
+        //->middleware('permission:view students');
+
+    Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
+        
+
+    Route::get('/', [StudentController::class, 'index'])
+        ->middleware('permission:view students');
+    
+    Route::get('/{student}', [StudentController::class, 'show'])
+        ->middleware('permission:view students');
+    
+    Route::patch('/{student}', [StudentController::class, 'update'])
+        ->middleware('permission:edit students');
+    
+    Route::delete('/{student}', [StudentController::class, 'destroy'])
+        ->middleware('permission:delete students');
+    
+    Route::post('/{student}/change-password', [StudentController::class, 'changePassword'])
+        ->middleware('permission:edit students');
+    
+    Route::post('/{student}/resend-verification', [StudentController::class, 'resendVerification'])
+        ->middleware('permission:edit students');
 });
 
 

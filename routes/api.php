@@ -12,6 +12,7 @@ use App\Http\Controllers\GeneralAttendanceController;
 use App\Http\Controllers\UserController;
 //enums
 use App\Enums\ServiceAbility;
+use App\Http\Controllers\Admission\PreEnrollmentExportController;
 use App\Http\Controllers\students\GradeLevelController;
 //resources
 use Illuminate\Http\Request;
@@ -25,7 +26,7 @@ use App\Http\Resources\UserResource;
 Route::middleware(['auth:sanctum', 'verified'])->get('/user', function (Request $request) {
     $user = $request->user();
     $user->load('roles.permissions', 'permissions');
-    
+
     return new UserResource($user);
 });
 
@@ -113,7 +114,8 @@ Route::prefix('admissions')->group(function () {
 
     Route::prefix('pre-enrollments')->group(function () {
         Route::get('/', [PreEnrollmentController::class, 'index']);
-        Route::get('/{preEnrollment}',[PreEnrollmentController::class, 'show']);
+        Route::get('/export', [PreEnrollmentExportController::class, 'export']);
+        Route::get('/{preEnrollment}', [PreEnrollmentController::class, 'show']);
     })->middleware('auth:sanctum', 'verified');
 });
 
@@ -124,19 +126,19 @@ Route::prefix('admissions')->group(function () {
 Route::prefix('users')->middleware('auth:sanctum', 'verified')->group(function () {
     Route::get('/', [UserController::class, 'index'])
         ->middleware('permission:view users');
-    
+
     Route::get('/{user}', [UserController::class, 'show'])
         ->middleware('permission:view users');
-    
+
     Route::patch('/{user}', [UserController::class, 'update'])
         ->middleware('permission:edit users');
-    
+
     Route::delete('/{user}', [UserController::class, 'destroy'])
         ->middleware('permission:delete users');
-    
+
     Route::post('/{user}/change-password', [UserController::class, 'changePassword'])
         ->middleware('permission:edit users');
-    
+
     Route::post('/{user}/resend-verification', [UserController::class, 'resendVerification'])
         ->middleware('permission:edit users');
 });
@@ -153,30 +155,30 @@ Route::middleware('auth:sanctum', 'verified')->group(function () {
 
 /**
  * student management
-*/
+ */
 Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(function () {
 
     Route::get('/grades', [GradeLevelController::class, 'index']);
-        //->middleware('permission:view students');
+    //->middleware('permission:view students');
 
     Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
-        
+
 
     Route::get('/', [StudentController::class, 'index'])
         ->middleware('permission:view students');
-    
+
     Route::get('/{student}', [StudentController::class, 'show'])
         ->middleware('permission:view students');
-    
+
     Route::patch('/{student}', [StudentController::class, 'update'])
         ->middleware('permission:edit students');
-    
+
     Route::delete('/{student}', [StudentController::class, 'destroy'])
         ->middleware('permission:delete students');
-    
+
     Route::post('/{student}/change-password', [StudentController::class, 'changePassword'])
         ->middleware('permission:edit students');
-    
+
     Route::post('/{student}/resend-verification', [StudentController::class, 'resendVerification'])
         ->middleware('permission:edit students');
 });

@@ -59,7 +59,7 @@ class TelegramMessageService
         if ($enrollment && $enrollment->classGroup) {
             $grade = $enrollment->classGroup->gradeLevel->name ?? '';
             $group = $enrollment->classGroup->name ?? '';
-            $gradeInfo = "📚 Grado: {$grade} {$group}\n";
+            $gradeInfo = Emojis::BOOK . " Grado: {$grade} {$group}\n";
         }
 
         foreach ($student->student->guardians as $guardian) {
@@ -141,7 +141,7 @@ class TelegramMessageService
     {
         Telegram::sendMessage([
             'chat_id' => $chatId,
-            'text' => 'Notificaciones habilitadas ✅'
+            'text' => 'Notificaciones habilitadas ' . Emojis::CHECK_MARK_BUTTON
         ]);
     }
 
@@ -149,7 +149,7 @@ class TelegramMessageService
 
     public function requireButton(int $chatId): void
     {
-        Telegram::sendMessage(['chat_id' => $chatId, 'text' => 'Use los botones 👆']);
+        Telegram::sendMessage(['chat_id' => $chatId, 'text' => 'Use los botones ' . Emojis::UP_ARROW]);
     }
 
     public function requireText(int $chatId): void
@@ -216,8 +216,6 @@ class TelegramMessageService
                 $studentList . "\n\n" .
                 "*Tipos de notificaciones:*\n" .
                 "• Asistencias y retardos de entradas y salidas\n" .
-                //"• Avisos importantes\n" .
-                //"• Eventos escolares\n\n" .
                 "¿Tiene más hijos en la escuela?",
             'parse_mode' => 'Markdown',
             'reply_markup' => json_encode([

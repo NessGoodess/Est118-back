@@ -25,4 +25,5 @@ enum Emojis
     public const INFORMATION_BUTTON = 'ℹ️';
     public const SCHOOL = '🏫';
     public const BOOK = '📖';
+    public const UP_ARROW = '👆';
 }

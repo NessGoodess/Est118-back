@@ -242,6 +242,6 @@ class Student extends Model
     {
         return $this->hasOne(Enrollment::class)
             ->where('status', 'active')
-            ->latest(); // O el criterio que uses para "actual"
+            ->latest();
     }
 }

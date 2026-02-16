@@ -23,21 +23,26 @@ class StudentController extends Controller
     public function index(): JsonResponse
     {
         $students = Student::with([
-            'profile:id,first_name,last_name',
+            'profile:id,first_name,last_name,profile_picture',
             'enrollments' => fn($q) => $q->where('status', 'active')->with([
                 'classGroup:id,name,grade_level_id',
                 'classGroup.gradeLevel:id,name'
             ]),
         ])
             ->get()
-            ->map(fn($student) => [
-                'id' => $student->id,
-                'credential_id' => $student->credential_id,
-                'name' => $student->profile->first_name . ' ' . $student->profile->last_name,
-                'current_grade' => optional($student->enrollments->first()?->classGroup?->gradeLevel)?->name ?? 'N/A',
-                'current_group' => optional($student->enrollments->first()?->classGroup)?->name ?? 'N/A',
-                'photo_url' => $student->profile->profile_picture_url,
-            ]);
+            ->map(function ($student) {
+                $enrollment = $student->enrollments->first();
+                $grade = optional($enrollment?->classGroup?->gradeLevel)?->name ?? 'N/A';
+                $group = optional($enrollment?->classGroup)?->name ?? 'N/A';
+                return [
+                    'id' => $student->id,
+                    'credential_id' => $student->credential_id,
+                    'name' => $student->profile->first_name . ' ' . $student->profile->last_name,
+                    'current_grade' => $grade,
+                    'current_group' => $group,
+                    'photo_url' => $this->studentsService->generatePrivateImageUrl($grade, $group, $student->profile->profile_picture ?? null),
+                ];
+            });
 
         if($students->isEmpty()){
             return response()->json([

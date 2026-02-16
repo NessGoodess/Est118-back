@@ -16,6 +16,8 @@ class GeneralAttendance extends Model
         'academic_year_id',
         'date',
         'scanned_at',
+        'entry_at',
+        'exit_at',
         'status',
         'absence_request_id',
     ];
@@ -23,6 +25,8 @@ class GeneralAttendance extends Model
     protected $casts = [
         'date' => 'date',
         'scanned_at' => 'datetime',
+        'entry_at' => 'datetime',
+        'exit_at' => 'datetime',
         'source' => AttendanceSource::class,
     ];
 

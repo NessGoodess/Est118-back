@@ -32,11 +32,14 @@ class SendTelegramNotificationJob implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  string  $type  'entry' | 'exit'
      */
     public function __construct(
         public string $telegramId,
         public array $studentData,
-        public \DateTimeInterface $registrationTime
+        public \DateTimeInterface $registrationTime,
+        public string $type = 'entry'
     ) {}
 
     /**
@@ -66,15 +69,22 @@ class SendTelegramNotificationJob implements ShouldQueue
     {
         $s = $this->studentData;
         $t = $this->registrationTime;
+        $isEntry = $this->type === 'entry';
 
-        return "👋 <b>Estimado(a) padre/madre de familia:</b>\n\n" .
-            "Le informamos que su hijo(a):\n\n" .
+        $title = $isEntry ? '✅ ENTRADA A LA ESCUELA' : '🚪 SALIDA DE LA ESCUELA';
+        $icon = $isEntry ? '🏫' : '🏃';
+        $horaLabel = $isEntry ? 'Hora de entrada' : 'Hora de salida';
+        $mensaje = $isEntry ? 'ha ingresado a la institución' : 'ha salido de la institución';
+
+        return "{$icon} <b>{$title}</b>\n\n" .
+            "Estimado(a) padre/madre de familia:\n\n" .
+            "Su hijo(a):\n\n" .
             "<b>👨‍🎓 {$s['name']}</b>\n" .
             "<b>📘 Grado y Grupo:</b> {$s['grade']} \"{$s['group']}\"\n\n" .
-            "<b>🕘 Hora de ingreso:</b> {$t->format('H:i:s')}\n" .
+            "<b>🕘 {$horaLabel}:</b> {$t->format('H:i:s')}\n" .
             "<b>📅 Fecha:</b> {$t->format('d/m/Y')}\n\n" .
-            "<b>✅ Asistencia registrada correctamente.</b>\n\n" .
-            "<i>Seguimos trabajando por la seguridad y el bienestar de nuestros alumnos.</i>";
+            "<b>{$mensaje}</b>\n\n" .
+            "<i>Seguimos trabajando por la seguridad de nuestros alumnos.</i>";
     }
 
     /**

@@ -66,9 +66,10 @@ Route::prefix('reader')->group(function () {
  * Attendance
  * ___________________________________________________________________________
  */
-Route::prefix('attendance')->group(function () {
+Route::prefix('attendance')->middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('/last-attendance', [GeneralAttendanceController::class, 'getLastAttendance']);
     Route::get('/all-attendances', [GeneralAttendanceController::class, 'index']);
+    Route::get('/recent-readings', [GeneralAttendanceController::class, 'recentReadings']);
 });
 
 

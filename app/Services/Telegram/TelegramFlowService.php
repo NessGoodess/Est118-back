@@ -6,6 +6,7 @@ use App\Enums\SessionStep;
 use App\Models\Guardian;
 use App\Models\TelegramSession;
 use Telegram\Bot\Laravel\Facades\Telegram;
+use Illuminate\Support\Facades\Log;
 
 class TelegramFlowService
 {
@@ -16,26 +17,33 @@ class TelegramFlowService
 
     public function handle($update): void
     {
-        try{
-        $chatId = $this->getChatId($update);
+        try {
+            $chatId = $this->getChatId($update);
 
-        $session = TelegramSession::firstOrCreate(
-            ['chat_id' => $chatId],
-            ['step' => SessionStep::START]
-        );
+            $session = TelegramSession::firstOrCreate(
+                ['chat_id' => $chatId],
+                ['step' => SessionStep::START]
+            );
 
-        match ($session->step) {
-            SessionStep::START      => $this->start($session, $update),
-            SessionStep::ENTER_CURP => $this->enterCurp($session, $update),
-            SessionStep::CONFIRM    => $this->confirmGuardian($session, $update),
-            SessionStep::COMPLETED  => $this->completed($session, $update),
-        };
-    } catch (\Exception $e) {
-        Telegram::sendMessage([
-            'chat_id' => $chatId,
-            'text' => $e->getMessage(),
-        ]);
-    }
+            match ($session->step) {
+                SessionStep::START      => $this->start($session, $update),
+                SessionStep::ENTER_CURP => $this->enterCurp($session, $update),
+                SessionStep::CONFIRM    => $this->confirmGuardian($session, $update),
+                SessionStep::COMPLETED  => $this->completed($session, $update),
+            };
+        } catch (\Exception $e) {
+            Log::error('Telegram Flow handler Error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            if ($chatId) {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => 'Ocurrió un error interno, por favor si le es posible tome una captura y reporte a la institución.',
+                ]);
+            }
+        }
     }
 
     private function getChatId($update): int
@@ -51,7 +59,7 @@ class TelegramFlowService
     {
         if ($update->getCallbackQuery()) {
             $data = $update->getCallbackQuery()->getData();
-            
+
             if ($data === 'begin' || $data === 'add_another') {
                 $session->update(['step' => SessionStep::ENTER_CURP]);
                 $this->messages->requestCurp($session->chat_id);
@@ -64,6 +72,16 @@ class TelegramFlowService
 
     private function enterCurp(TelegramSession $session, $update): void
     {
+        if ($update->getCallbackQuery()) {
+            $data = $update->getCallbackQuery()->getData();
+
+            if ($data === 'cancel') {
+                $session->update(['step' => SessionStep::START]);
+                $this->messages->cancelMenu($session->chat_id);
+                return;
+            }
+        }
+
         if (!$update->getMessage()) {
             $this->messages->requireText($session->chat_id);
             return;
@@ -106,6 +124,12 @@ class TelegramFlowService
 
         $data = $update->getCallbackQuery()->getData();
 
+        if ($data === 'cancel') {
+            $session->update(['step' => SessionStep::START]);
+            $this->messages->cancelMenu($session->chat_id);
+            return;
+        }
+
         if ($data === 'guardian_registered') {
             $this->messages->guardianAlreadyRegistered($session->chat_id);
             return;
@@ -125,13 +149,20 @@ class TelegramFlowService
             return;
         }
 
-        // Si el tutor ya tiene telegram_id pero es diferente al actual
+        $existingGuardian = Guardian::where('telegram_id', $session->chat_id)
+            ->where('id', '!=', $guardian->id)
+            ->first();
+
+        if ($existingGuardian) {
+            $this->messages->telegramAccountLinkedToAnother($session->chat_id);
+            return;
+        }
+
         if ($guardian->telegram_id && $guardian->telegram_id !== $session->chat_id) {
             $this->messages->guardianAlreadyRegistered($session->chat_id);
             return;
         }
 
-        // Vincular o actualizar el telegram_id
         $guardian->update(['telegram_id' => $session->chat_id]);
         $session->update(['step' => SessionStep::COMPLETED]);
 
@@ -142,7 +173,7 @@ class TelegramFlowService
     {
         if ($update->getCallbackQuery()) {
             $data = $update->getCallbackQuery()->getData();
-            
+
             if ($data === 'add_another') {
                 $session->update(['step' => SessionStep::ENTER_CURP]);
                 $this->messages->requestCurp($session->chat_id);

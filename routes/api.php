@@ -77,6 +77,13 @@ Route::post('/telegram/webhook', [TelegramController::class, 'webhook']);
 
 Route::get('/schedules', [ScheduleController::class, 'index']);
 
+Route::get('/debug-telegram-config', function () {
+    return [
+        'env_token' => env('TELEGRAM_BOT_TOKEN'),
+        'config_token' => config('telegram.bots.mybot.token'),
+        'default_bot' => config('telegram.default'),
+    ];
+});
 
 /**
  * Admission Settings Routes

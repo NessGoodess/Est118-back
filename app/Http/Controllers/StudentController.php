@@ -38,6 +38,13 @@ class StudentController extends Controller
                 'current_group' => optional($student->enrollments->first()?->classGroup)?->name ?? 'N/A',
                 'photo_url' => $student->profile->profile_picture_url,
             ]);
+
+        if($students->isEmpty()){
+            return response()->json([
+                'success' => false,
+                'message' => 'No se encontraron estudiantes',
+            ], 404);
+        }
         return response()->json([
             'success' => true,
             'data' => $students
@@ -128,6 +135,7 @@ class StudentController extends Controller
                     ),
                 ];
             });
+            
 
         return response()->json([
             'success' => true,

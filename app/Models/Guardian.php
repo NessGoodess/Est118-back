@@ -38,4 +38,20 @@ class Guardian extends Model
     {
         return $this->belongsToMany(Student::class, 'guardian_student');
     }
+
+    protected static function booted()
+    {
+        static::saving(function ($guardian) {
+            // Verificar que el telegram_id no esté duplicado en OTRO guardian
+            if ($guardian->telegram_id) {
+                $exists = static::where('telegram_id', $guardian->telegram_id)
+                    ->where('id', '!=', $guardian->id)
+                    ->exists();
+
+                if ($exists) {
+                    throw new \Exception('El ID de Telegram ya está registrado por otro tutor');
+                }
+            }
+        });
+    }
 }

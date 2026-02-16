@@ -237,4 +237,11 @@ class Student extends Model
     {
         return $this->hasMany(ClassStudent::class);
     }
+
+    public function currentEnrollment()
+    {
+        return $this->hasOne(Enrollment::class)
+            ->where('status', 'active')
+            ->latest(); // O el criterio que uses para "actual"
+    }
 }

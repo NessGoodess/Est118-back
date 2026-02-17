@@ -29,6 +29,7 @@ class PermissionSeeder extends Seeder
             
             // Admission permissions
             'view pre-enrollments',
+            'edit pre-enrollments',
             'manage admission cycles',
 
             'view general attendance',

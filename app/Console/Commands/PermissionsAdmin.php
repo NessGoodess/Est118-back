@@ -38,7 +38,7 @@ class PermissionsAdmin extends Command
         $adminRole = Role::where('name', 'admin')->first();
         $preEnrollmentAdminRole = Role::where('name', 'pre-enrollment-admin')->first();
         $adminRole->givePermissionTo(Permission::all());
-        $preEnrollmentAdminRole->givePermissionTo('view pre-enrollments', 'manage admission cycles');
+        $preEnrollmentAdminRole->givePermissionTo('view pre-enrollments', 'edit pre-enrollments', 'manage admission cycles');
         $this->info('Permissions reassigned successfully');
     }
 }

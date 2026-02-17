@@ -29,13 +29,8 @@ class PreEnrollmentService
         // 3. Temporal signed url for download pdf
         $signedUrl = $this->generateSignedUrl($preEnrollment->folio);
 
-        // 4. Calculate incremental delay to avoid Gmail rate limits
-        $counter = Cache::increment('email_delay_counter');
-        $delaySeconds = min($counter * 20, 1800); // max 30 minutes
-
-        // 5. Dispatch email to queue with delay for asynchronous processing
-        SendPreEnrollmentEmailJob::dispatch($preEnrollment, $pdfPath)
-            ->delay(now()->addSeconds($delaySeconds));
+        // 4. Dispatch email to queue with delay for asynchronous processing
+        $this->sendEmail($preEnrollment, $pdfPath);
 
         return [
             'folio' => $preEnrollment->folio,
@@ -56,7 +51,6 @@ class PreEnrollmentService
             ...$data,
             'admission_cycle_id' => $cycle->id,
         ]);
-
     }
 
     /**
@@ -144,6 +138,14 @@ class PreEnrollmentService
             throw new \RuntimeException("Imagen no encontrada: {$path}");
         }
 
-        return "data:image/{$mime};base64,".base64_encode(file_get_contents($path));
+        return "data:image/{$mime};base64," . base64_encode(file_get_contents($path));
+    }
+
+    public function sendEmail(PreEnrollment $preEnrollment, string $pdfPath): void
+    {
+        $counter = Cache::increment('email_delay_counter');
+        $delaySeconds = min($counter * 20, 1800); // max 30 minutes
+        SendPreEnrollmentEmailJob::dispatch($preEnrollment, $pdfPath)
+            ->delay(now()->addSeconds($delaySeconds));
     }
 }

@@ -116,6 +116,8 @@ Route::prefix('admissions')->group(function () {
         Route::get('/', [PreEnrollmentController::class, 'index']);
         Route::get('/export', [PreEnrollmentExportController::class, 'export']);
         Route::get('/{preEnrollment}', [PreEnrollmentController::class, 'show']);
+        Route::patch('/{preEnrollment}', [PreEnrollmentController::class, 'update']);
+        Route::post('/{preEnrollment}/resent-pdf-folio', [PreEnrollmentController::class, 'resentPdfFolio']);
     })->middleware('auth:sanctum', 'verified');
 });
 

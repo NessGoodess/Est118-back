@@ -25,6 +25,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
     {
         return [
             new Middleware('permission:view pre-enrollments')->only(['index', 'show']),
+            new Middleware('permission:edit pre-enrollments')->only(['update']),
         ];
     }
 
@@ -87,7 +88,9 @@ class PreEnrollmentController extends Controller implements HasMiddleware
      */
     public function update(UpdatePreEnrollmentRequest $request, PreEnrollment $preEnrollment)
     {
-        //
+        $preEnrollment->update($request->validated());
+
+        return response()->json($preEnrollment->fresh());
     }
 
     /**
@@ -117,5 +120,33 @@ class PreEnrollmentController extends Controller implements HasMiddleware
                 'Content-Disposition' => "inline; filename=\"{$preEnrollment->folio}.pdf\"",
             ]
         );
+    }
+
+    /**
+     * Resent PDF Folio
+     */
+    public function resentPdfFolio(PreEnrollment $preEnrollment)
+    {
+        try {
+            $pdf= $preEnrollment->folio;
+            $pdfPath = "pdf/admission/{$pdf}.pdf";
+            $this->preEnrollmentService->sendEmail($preEnrollment, $pdfPath);
+        } catch (\Throwable $th) {
+            Log::error('Error al reenviar PDF', [
+                'message' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al reenviar PDF',
+            ], 500);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'PDF resent successfully',
+            'folio' => $preEnrollment->folio,
+            
+        ]);
     }
 }

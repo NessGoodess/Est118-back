@@ -10,11 +10,12 @@ use App\Models\GeneralAttendance;
 use App\Models\RecentReading;
 use App\Models\Student;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class NfcCredentialController extends Controller
 {
-    private const ENTRY_LATE_CUTOFF = '08:00';
+    private const ENTRY_LATE_CUTOFF = '07:00';
 
     private const EXIT_EARLIEST = '13:30';
 
@@ -41,6 +42,10 @@ class NfcCredentialController extends Controller
                     $payload = $this->handleCardRemoved($payload);
                     break;
 
+                case 'reader_status_changed':
+                    $payload = $this->handleReaderStatusChanged($data, $payload);
+                    break;
+
                 default:
                     $payload = $this->handleUnknownEvent($payload);
             }
@@ -57,7 +62,7 @@ class NfcCredentialController extends Controller
             broadcast(new CredentialReadEvent([
                 'event' => 'error',
                 'status' => 'error',
-                'message' => 'Error interno: '.$e->getMessage(),
+                'message' => 'Error interno: ' . $e->getMessage(),
                 'timestamp' => now()->toIso8601String(),
             ]));
 
@@ -91,7 +96,7 @@ class NfcCredentialController extends Controller
             'academicYear:id',
         ])
             ->where('status', 'active')
-            ->whereHas('student', fn ($q) => $q->where('credential_id', $credentialId))
+            ->whereHas('student', fn($q) => $q->where('credential_id', $credentialId))
             ->first();
 
         if (! $enrollment) {
@@ -163,7 +168,7 @@ class NfcCredentialController extends Controller
                 'credential_id' => $credentialId,
                 'status' => 'warning',
                 'student' => $studentData,
-                'message' => 'No es horario de salida. Intente después de las '.self::EXIT_EARLIEST,
+                'message' => 'No es horario de salida. Intente después de las ' . self::EXIT_EARLIEST,
             ];
         }
 
@@ -215,13 +220,13 @@ class NfcCredentialController extends Controller
         $photo = $enrollment->student->profile?->profile_picture;
 
         $photoPath = ($grade && $group && $photo)
-            ? 'photos/students/'.rawurlencode($grade).'/'.rawurlencode($group).'/'.rawurlencode($photo)
+            ? 'photos/students/' . rawurlencode($grade) . '/' . rawurlencode($group) . '/' . rawurlencode($photo)
             : 'photos/students/default.png';
 
         return [
             'id' => $enrollment->student->id,
             'credential_id' => $enrollment->student->credential_id,
-            'name' => $enrollment->student->profile->first_name.' '.$enrollment->student->profile->last_name,
+            'name' => $enrollment->student->profile->first_name . ' ' . $enrollment->student->profile->last_name,
             'photo_url' => $photoPath,
             'grade' => $grade,
             'group' => $group,
@@ -257,6 +262,42 @@ class NfcCredentialController extends Controller
             'message' => 'Tarjeta retirada. Esperando nueva credencial...',
             'student' => null,
         ];
+    }
+
+    /**
+     * Handle reader connection status (connected / disconnected).
+     * Broadcast so the frontend can show reader status.
+     */
+    private function handleReaderStatusChanged(array $data, array $payload): array
+    {
+        $status = $payload + [
+            'event' => 'reader_status_changed',
+            'connected' => (bool) ($data['connected'] ?? false),
+            'ready' => (bool) ($data['ready'] ?? false),
+            'readers' => $data['readers'] ?? [],
+            'timestamp' => now()->toIso8601String(),
+        ];
+
+        // Save current state for frontend synchronization
+        Cache::put('nfc_reader_status', $status, now()->addHours(2));
+
+        return $status;
+    }
+
+    /**
+     * Return the last known reader status from cache.
+     */
+    public function readerStatus()
+    {
+        $status = Cache::get('nfc_reader_status', [
+            'event' => 'reader_status_changed',
+            'connected' => false,
+            'ready' => false,
+            'readers' => [],
+            'timestamp' => now()->toIso8601String(),
+        ]);
+
+        return response()->json($status);
     }
 
     private function handleUnknownEvent(array $payload): array

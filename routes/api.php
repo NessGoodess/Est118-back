@@ -61,6 +61,10 @@ Route::prefix('reader')->group(function () {
             'auth:sanctum',
             'service.token:' . ServiceAbility::NFC_READER->value,
         ]);
+
+    // Reader status (Synchronization)
+    Route::get('/status', [NfcCredentialController::class, 'readerStatus'])
+        ->middleware(['auth:sanctum', 'verified']);
 });
 
 /**

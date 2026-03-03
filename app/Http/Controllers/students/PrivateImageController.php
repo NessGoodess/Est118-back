@@ -14,6 +14,7 @@ class PrivateImageController extends Controller
     public function show($path)
     {
         try {
+            Log::info('Image request: '. $path);
 
             $cleanPath = ltrim($path, '/');
 
@@ -40,8 +41,6 @@ class PrivateImageController extends Controller
                     'message' => 'not found',
                 ], 404);
             }
-
-            Log::info('Image found: '. $cleanPath);
 
             return Storage::disk('private')->response($cleanPath, null, [
                 'Cache-Control' => 'private, max-age=86400',

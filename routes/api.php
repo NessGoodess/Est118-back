@@ -14,6 +14,7 @@ use App\Http\Controllers\UserController;
 use App\Enums\ServiceAbility;
 use App\Http\Controllers\Admission\PreEnrollmentExportController;
 use App\Http\Controllers\students\GradeLevelController;
+use App\Http\Controllers\students\PrivateImageController;
 //resources
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -187,7 +188,15 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
 
     Route::post('/{student}/resend-verification', [StudentController::class, 'resendVerification'])
         ->middleware('permission:edit students');
+
 });
+
+
+Route::get('/private-image/{path}', [PrivateImageController::class, 'show'])
+    ->where('path', '.*')
+    ->middleware('auth:sanctum')
+    ->name('private.image');
+
 
 
 require __DIR__ . '/service.php';

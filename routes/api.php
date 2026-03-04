@@ -193,7 +193,7 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
 
 Route::get('/private-image/{id}', [PrivateImageController::class, 'showById'])
     ->whereNumber('id')
-    ->middleware('auth:sanctum')
+    ->middleware('signed')
     ->name('private.image');
 
 

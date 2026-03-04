@@ -40,11 +40,15 @@ class StudentController extends Controller
                     'name' => $student->profile->first_name . ' ' . $student->profile->last_name,
                     'current_grade' => $grade,
                     'current_group' => $group,
-                    'photo_url' => $this->studentsService->generatePrivateImageUrl($grade, $group, $student->profile->profile_picture ?? null),
+                    'photo_url' => \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                        'private.image',
+                        now()->addMinutes(60),
+                        ['id' => $student->id]
+                    ),
                 ];
             });
 
-        if($students->isEmpty()){
+        if ($students->isEmpty()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No se encontraron estudiantes',
@@ -133,14 +137,14 @@ class StudentController extends Controller
                     'phone' => $student->profile->phone_number,
                     'grade_level' => $currentEnrollment->classGroup->gradeLevel->name,
                     'class_group' => $currentEnrollment->classGroup->name,
-                    'photo_url' => $this->studentsService->generatePrivateImageUrl(
-                        $currentEnrollment->classGroup->gradeLevel->name,
-                        $currentEnrollment->classGroup->name,
-                        $student->profile->profile_picture
+                    'photo_url' => \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                        'private.image',
+                        now()->addMinutes(60),
+                        ['id' => $student->id]
                     ),
                 ];
             });
-            
+
 
         return response()->json([
             'success' => true,
@@ -148,7 +152,8 @@ class StudentController extends Controller
         ]);
     }
 
-    public function getStudent($id){
+    public function getStudent($id)
+    {
         $student = Student::with([
             'profile',
             'enrollments.classGroup.gradeLevel',
@@ -196,8 +201,5 @@ class StudentController extends Controller
             'success' => true,
             'data' => $student
         ]);
-    
     }
 }
-
-

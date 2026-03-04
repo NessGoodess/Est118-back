@@ -37,9 +37,11 @@ class GeneralAttendanceController extends Controller
                 $group = $student->currentGroup?->name;
                 $photo = $student->profile?->profile_picture;
 
-                $photoPath = ($grade && $group && $photo)
-                    ? 'photos/students/'.rawurlencode($grade).'/'.rawurlencode($group).'/'.rawurlencode($photo)
-                    : 'photos/students/default.png';
+                $photoUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                    'private.image',
+                    now()->addMinutes(60),
+                    ['id' => $student->id]
+                );
 
                 return [
                     'id' => $student->id,
@@ -50,7 +52,7 @@ class GeneralAttendanceController extends Controller
                             $student->profile?->last_name,
                         ])->filter()->join(' ')
                     ),
-                    'photo_url' => $photoPath,
+                    'photo_url' => $photoUrl,
                     'grade' => $grade,
                     'group' => $group,
                     'registered_at' => $attendance->scanned_at?->toIso8601String(),
@@ -94,15 +96,17 @@ class GeneralAttendanceController extends Controller
             $group = $student->currentGroup?->name;
             $photo = $student->profile?->profile_picture;
 
-            $photoPath = ($grade && $group && $photo)
-                ? 'photos/students/'.rawurlencode($grade).'/'.rawurlencode($group).'/'.rawurlencode($photo)
-                : 'photos/students/default.png';
+            $photoUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                'private.image',
+                now()->addMinutes(60),
+                ['id' => $attendance->student_id]
+            );
 
             return response()->json([
                 'id' => $attendance->student_id,
                 'credential_id' => $student->credential_id,
-                'name' => trim($firstName.' '.$lastName),
-                'photo_url' => $photoPath,
+                'name' => trim($firstName . ' ' . $lastName),
+                'photo_url' => $photoUrl,
                 'grade' => optional($student->currentGroup?->gradeLevel)->name,
                 'group' => optional($student->currentGroup)->name,
                 'registered_at' => $attendance->scanned_at?->toIso8601String(),
@@ -135,15 +139,17 @@ class GeneralAttendanceController extends Controller
                 $grade = $student->currentGroup?->gradeLevel?->name;
                 $group = $student->currentGroup?->name;
                 $photo = $student->profile?->profile_picture;
-                $photoPath = ($grade && $group && $photo)
-                    ? 'photos/students/'.rawurlencode($grade).'/'.rawurlencode($group).'/'.rawurlencode($photo)
-                    : 'photos/students/default.png';
+                $photoUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                    'private.image',
+                    now()->addMinutes(60),
+                    ['id' => $student->id]
+                );
 
                 return [
                     'id' => $r->id,
                     'student_id' => $student->id,
-                    'name' => trim($student->profile?->first_name.' '.$student->profile?->last_name ?? ''),
-                    'photo_url' => $photoPath,
+                    'name' => trim($student->profile?->first_name . ' ' . $student->profile?->last_name ?? ''),
+                    'photo_url' => $photoUrl,
                     'grade' => $grade,
                     'group' => $group,
                     'event' => $r->event,

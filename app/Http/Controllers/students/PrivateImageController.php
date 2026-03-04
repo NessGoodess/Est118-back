@@ -11,50 +11,47 @@ class PrivateImageController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show($path)
+    public function showById($id)
     {
         try {
-            Log::info('Image request: '. $path);
+            $student = \App\Models\Student::with(['profile', 'currentGroup.gradeLevel'])->findOrFail($id);
 
-            $cleanPath = ltrim($path, '/');
+            $grade = $student->currentGroup?->gradeLevel?->name;
+            $group = $student->currentGroup?->name;
+            $photo = $student->profile?->profile_picture;
 
-            if (str_contains($cleanPath, '..')) {
-                Log::error('Traversal path detected: ', [
-                    'path' => $path,
-                    'user_id' => request()->user()->id ?? 'guest',
-                    'ip' => request()->ip(),
-                    'method' => request()->method(),
-                ]);
-                
-                return response()->json([
-                    'success' => false,
-                    'message' => 'unauthorized',
-                ], 403);
+            if ($grade && $group && $photo) {
+                $path = 'photos/students/' . $grade . '/' . $group . '/' . $photo;
+            } else {
+                $path = 'photos/students/default.png';
             }
 
-            if (!Storage::disk('private')->exists($cleanPath)) {
+            if (!Storage::disk('private')->exists($path)) {
+                Log::error('Image not found for student ' . $id . ': ' . $path);
 
-                Log::error('Image not found: '. $cleanPath);
-                
                 return response()->json([
                     'success' => false,
                     'message' => 'not found',
                 ], 404);
             }
 
-            return Storage::disk('private')->response($cleanPath, null, [
+            return Storage::disk('private')->response($path, null, [
                 'Cache-Control' => 'private, max-age=86400',
             ]);
-            
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'student not found',
+            ], 404);
         } catch (\Throwable $e) {
             Log::error('Error al obtener la imagen: ', [
                 'error' => $e->getMessage(),
-                'path' => $path,
+                'student_id' => $id,
                 'user_id' => request()->user()->id ?? 'guest',
                 'ip' => request()->ip(),
                 'method' => request()->method(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'internal server error',

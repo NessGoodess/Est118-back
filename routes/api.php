@@ -188,12 +188,11 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
 
     Route::post('/{student}/resend-verification', [StudentController::class, 'resendVerification'])
         ->middleware('permission:edit students');
-
 });
 
 
-Route::get('/private-image/{path}', [PrivateImageController::class, 'show'])
-    ->where('path', '.*')
+Route::get('/private-image/{id}', [PrivateImageController::class, 'showById'])
+    ->whereNumber('id')
     ->middleware('auth:sanctum')
     ->name('private.image');
 

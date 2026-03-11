@@ -7,6 +7,7 @@ use App\Http\Requests\StoreStudentRequest;
 use App\Http\Requests\UpdateStudentRequest;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use App\Services\StudentsService;
+use Illuminate\Support\Facades\URL;
 
 class StudentController extends Controller
 {
@@ -23,7 +24,7 @@ class StudentController extends Controller
     public function index(): JsonResponse
     {
         $students = Student::with([
-            'profile:id,first_name,last_name,profile_picture',
+            'profile:id,first_name,last_name,profile_picture,updated_at',
             'enrollments' => fn($q) => $q->where('status', 'active')->with([
                 'classGroup:id,name,grade_level_id',
                 'classGroup.gradeLevel:id,name'
@@ -40,11 +41,11 @@ class StudentController extends Controller
                     'name' => $student->profile->first_name . ' ' . $student->profile->last_name,
                     'current_grade' => $grade,
                     'current_group' => $group,
-                    'photo_url' => \Illuminate\Support\Facades\URL::temporarySignedRoute(
-                        'private.image',
-                        now()->addMinutes(60),
-                        ['id' => $student->id]
-                    ),
+                    'photo_url' => $this->getUrlPhoto(
+                        $student->id,
+                        $student->profile->profile_picture,
+                        $student->profile->updated_at
+                    )
                 ];
             });
 
@@ -137,11 +138,11 @@ class StudentController extends Controller
                     'phone' => $student->profile->phone_number,
                     'grade_level' => $currentEnrollment->classGroup->gradeLevel->name,
                     'class_group' => $currentEnrollment->classGroup->name,
-                    'photo_url' => \Illuminate\Support\Facades\URL::temporarySignedRoute(
-                        'private.image',
-                        now()->addMinutes(60),
-                        ['id' => $student->id]
-                    ),
+                    'photo_url' => $this->getUrlPhoto(
+                        $student->id,
+                        $student->profile->profile_picture,
+                        $student->profile->updated_at
+                    )
                 ];
             });
 
@@ -201,5 +202,24 @@ class StudentController extends Controller
             'success' => true,
             'data' => $student
         ]);
+    }
+
+
+    private function getUrlPhoto(int $studentId, ?string $photo, $updated_at): ?string
+    {
+
+        if (!$photo || !$updated_at) return null;
+
+        $version = $updated_at->timestamp;
+
+        return  URL::temporarySignedRoute(
+            'private.image',
+            now()->addMinutes(60),
+            [
+                'id' => $studentId,
+                'size' => 'thumb',
+                'v' => $version
+            ]
+        );
     }
 }

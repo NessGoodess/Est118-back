@@ -12,6 +12,7 @@ use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 
 class NfcCredentialController extends Controller
 {
@@ -217,16 +218,30 @@ class NfcCredentialController extends Controller
     {
         $grade = $enrollment->classGroup?->gradeLevel?->name;
         $group = $enrollment->classGroup?->name;
+        $version = $enrollment->student->profile?->updated_at?->timestamp
+            ?? $enrollment->student->updated_at?->timestamp
+            ?? now()->timestamp;
+        $name = trim(
+            ($enrollment->student->profile?->first_name ?? '') . ' ' .
+                ($enrollment->student->profile?->last_name ?? '')
+        );
         $photo = $enrollment->student->profile?->profile_picture;
 
-        $photoPath = ($grade && $group && $photo)
-            ? 'photos/students/' . rawurlencode($grade) . '/' . rawurlencode($group) . '/' . rawurlencode($photo)
-            : 'photos/students/default.png';
+        $photoPath = $photo
+            ? URL::temporarySignedRoute(
+                'private.image',
+                now()->addMinutes(60),
+                [
+                    'id' => $enrollment->student->id,
+                    'size' => 'profile',
+                    'v' => $version
+                ]
+            ) : null;
 
         return [
             'id' => $enrollment->student->id,
             'credential_id' => $enrollment->student->credential_id,
-            'name' => $enrollment->student->profile->first_name . ' ' . $enrollment->student->profile->last_name,
+            'name' => $name,
             'photo_url' => $photoPath,
             'grade' => $grade,
             'group' => $group,

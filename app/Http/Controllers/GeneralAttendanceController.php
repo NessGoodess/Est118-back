@@ -7,6 +7,7 @@ use App\Models\GeneralAttendance;
 use App\Models\RecentReading;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 
 class GeneralAttendanceController extends Controller
 {
@@ -23,7 +24,7 @@ class GeneralAttendanceController extends Controller
                 ->where('source', AttendanceSource::NFC)
                 ->with([
                     'student:id,credential_id,profile_id',
-                    'student.profile:id,first_name,last_name,profile_picture',
+                    'student.profile:id,first_name,last_name,profile_picture,updated_at',
                     'student.currentGroup.gradeLevel:id,name',
                     'student.currentGroup',
                 ])
@@ -35,12 +36,10 @@ class GeneralAttendanceController extends Controller
                 $student = $attendance->student;
                 $grade = $student->currentGroup?->gradeLevel?->name;
                 $group = $student->currentGroup?->name;
-                $photo = $student->profile?->profile_picture;
-
-                $photoUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
-                    'private.image',
-                    now()->addMinutes(60),
-                    ['id' => $student->id]
+                $photoUrl = $this->getUrlPhoto(
+                    $student->id,
+                    $student->profile->profile_picture,
+                    $student->profile->updated_at
                 );
 
                 return [
@@ -92,14 +91,11 @@ class GeneralAttendanceController extends Controller
             $student = $attendance->student;
             $firstName = $student->profile?->first_name;
             $lastName = $student->profile?->last_name;
-            $grade = $student->currentGroup?->gradeLevel?->name;
-            $group = $student->currentGroup?->name;
-            $photo = $student->profile?->profile_picture;
 
-            $photoUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
-                'private.image',
-                now()->addMinutes(60),
-                ['id' => $attendance->student_id]
+            $photoUrl = $this->getUrlPhoto(
+                $student->id,
+                $student->profile->profile_picture,
+                $student->profile->updated_at
             );
 
             return response()->json([
@@ -138,11 +134,10 @@ class GeneralAttendanceController extends Controller
                 $student = $r->student;
                 $grade = $student->currentGroup?->gradeLevel?->name;
                 $group = $student->currentGroup?->name;
-                $photo = $student->profile?->profile_picture;
-                $photoUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
-                    'private.image',
-                    now()->addMinutes(60),
-                    ['id' => $student->id]
+                $photoUrl = $this->getUrlPhoto(
+                    $student->id,
+                    $student->profile->profile_picture,
+                    $student->profile->updated_at
                 );
 
                 return [
@@ -164,5 +159,23 @@ class GeneralAttendanceController extends Controller
 
             return response()->json([]);
         }
+    }
+
+    private function getUrlPhoto(int $studentId, ?string $photo, $updated_at): ?string
+    {
+
+        if (!$photo || !$updated_at) return null;
+
+        $version = $updated_at->timestamp;
+
+        return  URL::temporarySignedRoute(
+            'private.image',
+            now()->addMinutes(60),
+            [
+                'id' => $studentId,
+                'size' => 'profile',
+                'v' => $version
+            ]
+        );
     }
 }

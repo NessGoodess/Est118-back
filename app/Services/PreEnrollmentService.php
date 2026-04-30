@@ -18,10 +18,10 @@ class PreEnrollmentService
      * @param  array  $data  Validated request data
      * @return array ['folio' => string, 'downloadUrl' => string]
      */
-    public function createPreEnrollment(array $data): array
+    public function createPreEnrollment(array $data, ?int $cycleId = null): array
     {
         // 1. Create record in database
-        $preEnrollment = $this->storePreEnrollment($data);
+        $preEnrollment = $this->storePreEnrollment($data, $cycleId);
 
         // 2. Generate and store PDF (synchronous to have immediate download URL)
         $pdfPath = $this->generateAndStorePdf($preEnrollment);
@@ -41,9 +41,14 @@ class PreEnrollmentService
     /**
      * Creates the pre-enrollment record in the database.
      */
-    private function storePreEnrollment(array $data): PreEnrollment
+    private function storePreEnrollment(array $data, ?int $cycleId = null): PreEnrollment
     {
-        $cycle = AdmissionCycle::public()->firstOrFail();
+        if ($cycleId) {
+            $cycle = AdmissionCycle::findOrFail($cycleId);
+        } else {
+            $cycle = AdmissionCycle::where('status', \App\Enums\AdmissionCycleStatus::ACTIVE)->first() 
+                ?? AdmissionCycle::orderByDesc('id')->firstOrFail();
+        }
 
         $data = $this->createData($data);
 

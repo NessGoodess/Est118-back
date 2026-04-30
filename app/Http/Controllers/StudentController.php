@@ -208,9 +208,9 @@ class StudentController extends Controller
     private function getUrlPhoto(int $studentId, ?string $photo, $updated_at): ?string
     {
 
-        if (!$photo || !$updated_at) return null;
+        if (!$photo) return null;
 
-        $version = $updated_at->timestamp;
+        $version = $updated_at?->timestamp ?? time();
 
         return  URL::temporarySignedRoute(
             'private.image',

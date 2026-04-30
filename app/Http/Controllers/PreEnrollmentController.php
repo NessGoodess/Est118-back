@@ -26,6 +26,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         return [
             new Middleware('permission:view pre-enrollments')->only(['index', 'show']),
             new Middleware('permission:edit pre-enrollments')->only(['update']),
+            new Middleware('permission:create pre-enrollments')->only(['storeByAdmin']),
         ];
     }
 
@@ -81,6 +82,32 @@ class PreEnrollmentController extends Controller implements HasMiddleware
     public function show(PreEnrollment $preEnrollment)
     {
         return $preEnrollment;
+    }
+
+    /**
+     * Store a newly created pre-enrollment from the Admin panel.
+     */
+    public function storeByAdmin(StorePreEnrollmentRequest $request)
+    {
+        try {
+            $cycleId = $request->input('admission_cycle_id') ? (int) $request->input('admission_cycle_id') : null;
+            $result = $this->preEnrollmentService->createPreEnrollment($request->validated(), $cycleId);
+
+            return response()->json([
+                'folio' => $result['folio'],
+                'downloadUrl' => $result['downloadUrl'],
+                'message' => __('admissions.created_success'),
+            ], 201);
+        } catch (\Exception $e) {
+            Log::error('Error al crear preinscripción via Admin', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => __('admissions.error_processing'),
+            ], 500);
+        }
     }
 
     /**

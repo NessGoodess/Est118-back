@@ -29,11 +29,19 @@ class PermissionSeeder extends Seeder
             
             // Admission permissions
             'view pre-enrollments',
+            'create pre-enrollments',
             'edit pre-enrollments',
+            'delete pre-enrollments',
             'manage admission cycles',
 
             'view general attendance',
             'manage general attendance',
+
+            // Announcements / notices
+            'create announcements',
+            'view announcements',
+            'edit announcements',
+            'delete announcements',
         ];
 
         foreach ($permissions as $permission) {

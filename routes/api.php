@@ -10,6 +10,7 @@ use App\Http\Controllers\TelegramController;
 use App\Http\Controllers\Auth\ChangePasswordController;
 use App\Http\Controllers\GeneralAttendanceController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\AnnouncementController;
 //enums
 use App\Enums\ServiceAbility;
 use App\Http\Controllers\Admission\PreEnrollmentExportController;
@@ -118,12 +119,30 @@ Route::prefix('admissions')->group(function () {
     })->middleware('auth:sanctum', 'verified');
 
     Route::prefix('pre-enrollments')->group(function () {
+        Route::post('/', [PreEnrollmentController::class, 'storeByAdmin']);
         Route::get('/', [PreEnrollmentController::class, 'index']);
         Route::get('/export', [PreEnrollmentExportController::class, 'export']);
         Route::get('/{preEnrollment}', [PreEnrollmentController::class, 'show']);
         Route::patch('/{preEnrollment}', [PreEnrollmentController::class, 'update']);
         Route::post('/{preEnrollment}/resent-pdf-folio', [PreEnrollmentController::class, 'resentPdfFolio']);
     })->middleware('auth:sanctum', 'verified');
+});
+
+/**
+ * Announcements (Notices)
+ * ___________________________________________________________________________
+ */
+Route::prefix('announcements')->group(function () {
+    // Public endpoints
+    Route::get('/', [AnnouncementController::class, 'index']);
+    Route::get('/{announcement}', [AnnouncementController::class, 'show']);
+
+    // Management endpoints (authenticated + permission)
+    Route::middleware(['auth:sanctum', 'verified', 'permission:create announcements'])->group(function () {
+        Route::post('/', [AnnouncementController::class, 'store']);
+        Route::patch('/{announcement}', [AnnouncementController::class, 'update']);
+        Route::delete('/{announcement}', [AnnouncementController::class, 'destroy']);
+    });
 });
 
 /**

@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Admission;
 
+use App\Http\Controllers\Controller;
 use App\Enums\AdmissionCycleStatus;
 use App\Http\Requests\StorePreEnrollmentRequest;
 use App\Http\Requests\UpdatePreEnrollmentRequest;
@@ -33,15 +34,35 @@ class PreEnrollmentController extends Controller implements HasMiddleware
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(\Illuminate\Http\Request $request)
     {
-        $activeCycle = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)->first();
+        $cycleId = $request->integer('cycle_id');
 
-        if(!$activeCycle){
-            return response()->json([
-                'status' => 'Not Found',
-                'message' => __('admissions.no_active_cycle'),
-            ], 404);
+        // Si se envía cycle_id, úsalo, si no busca el ciclo activo
+        if ($cycleId) {
+            $cycle = AdmissionCycle::find($cycleId);
+            if (!$cycle) {
+                return response()->json([
+                    'status' => 'Not Found',
+                    'message' => 'Ciclo no encontrado',
+                ], 404);
+            }
+            $activeCycle = $cycle;
+        } else {
+            $activeCycle = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)->first();
+
+            if (!$activeCycle) {
+
+                $latestCycle = AdmissionCycle::latest()->first();
+                if (!$latestCycle) {
+                    return response()->json([
+                        'status' => 'Not Found',
+                        'message' => __('admissions.no_active_cycle'),
+                    ], 404);
+                }
+
+                $activeCycle = $latestCycle;
+            }
         }
 
         return PreEnrollmentListResource::collection(
@@ -155,7 +176,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
     public function resentPdfFolio(PreEnrollment $preEnrollment)
     {
         try {
-            $pdf= $preEnrollment->folio;
+            $pdf = $preEnrollment->folio;
             $pdfPath = "pdf/admission/{$pdf}.pdf";
             $this->preEnrollmentService->sendEmail($preEnrollment, $pdfPath);
         } catch (\Throwable $th) {
@@ -173,7 +194,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
             'status' => 'success',
             'message' => 'PDF resent successfully',
             'folio' => $preEnrollment->folio,
-            
+
         ]);
     }
 }

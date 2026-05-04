@@ -3,7 +3,7 @@
 use App\Http\Controllers\Admission\AdmissionCycleController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\NfcCredentialController;
-use App\Http\Controllers\PreEnrollmentController;
+use App\Http\Controllers\Admission\PreEnrollmentController;
 use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TelegramController;

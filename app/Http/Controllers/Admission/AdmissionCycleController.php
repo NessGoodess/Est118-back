@@ -31,7 +31,7 @@ class AdmissionCycleController extends Controller implements HasMiddleware
     public function index()
     {
         return response()->json(
-            AdmissionCycle::orderByDesc('created_at')->get()
+            AdmissionCycle::withCount('preenrollments')->orderByDesc('created_at')->get()
         );
     }
 

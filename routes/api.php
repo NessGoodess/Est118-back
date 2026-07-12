@@ -16,6 +16,7 @@ use App\Enums\ServiceAbility;
 use App\Http\Controllers\Admission\PreEnrollmentExportController;
 use App\Http\Controllers\students\GradeLevelController;
 use App\Http\Controllers\students\PrivateImageController;
+use App\Http\Controllers\School\AcademicYearController;
 //resources
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -126,7 +127,26 @@ Route::prefix('admissions')->group(function () {
         Route::patch('/{preEnrollment}', [PreEnrollmentController::class, 'update']);
         Route::post('/{preEnrollment}/resent-pdf-folio', [PreEnrollmentController::class, 'resentPdfFolio']);
     })->middleware('auth:sanctum', 'verified');
-});
+
+/**
+ * Academic years / annual processes
+ */
+Route::prefix('academic-years')
+    ->middleware(['auth:sanctum', 'verified'])
+    ->group(function () {
+        Route::get('/', [AcademicYearController::class, 'index'])
+            ->middleware('permission:manage re-enrollment|manage admission cycles');
+        Route::post('/', [AcademicYearController::class, 'store'])
+            ->middleware('permission:manage re-enrollment');
+        Route::patch('/{academicYear}', [AcademicYearController::class, 'update'])
+            ->middleware('permission:manage re-enrollment');
+        Route::patch('/{academicYear}/activate', [AcademicYearController::class, 'activate'])
+            ->middleware('permission:manage re-enrollment');
+        Route::post('/{academicYear}/generate-groups', [AcademicYearController::class, 'generateGroups'])
+            ->middleware('permission:manage re-enrollment');
+        Route::delete('/{academicYear}', [AcademicYearController::class, 'destroy'])
+            ->middleware('permission:manage re-enrollment');
+    });
 
 /**
  * Announcements (Notices)

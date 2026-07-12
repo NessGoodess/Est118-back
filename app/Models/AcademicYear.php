@@ -11,6 +11,7 @@ class AcademicYear extends Model
 {
     /** @use HasFactory<\Database\Factories\AcademicYearFactory> */
     use HasFactory;
+
     protected $fillable = [
         'year_start',
         'year_end',
@@ -20,16 +21,17 @@ class AcademicYear extends Model
 
     /**
      * Get all of the classGroup for the AcademicYear
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
     public function classGroup(): HasMany
     {
         return $this->hasMany(ClassGroup::class);
     }
-    /**
-     *
-     */
+
+    public function enrollments(): HasMany
+    {
+        return $this->hasMany(Enrollment::class);
+    }
+
     public static function getAcademicYearId($date)
     {
         $date = Carbon::parse($date);

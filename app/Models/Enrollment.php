@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\EnrollmentStatus;
+use App\Enums\PromotionResult;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,10 +17,18 @@ class Enrollment extends Model
         'class_group_id',
         'academic_year_id',
         'status',
+        //Promotion fields
+        'is_new_admission',
+        'is_approved',
+        'promotion_result',
     ];
 
     protected $casts = [
         'status' => EnrollmentStatus::class,
+        //Promotion fields
+        'is_new_admission' => 'boolean',
+        'is_approved' => 'boolean',
+        'promotion_result' => PromotionResult::class,
     ];
 
     /**

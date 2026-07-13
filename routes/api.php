@@ -11,11 +11,15 @@ use App\Http\Controllers\Auth\ChangePasswordController;
 use App\Http\Controllers\GeneralAttendanceController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\EnrollmentPromotionController;
+use App\Http\Controllers\AcademicYearPromotionController;
 //enums
 use App\Enums\ServiceAbility;
 use App\Http\Controllers\Admission\PreEnrollmentExportController;
 use App\Http\Controllers\students\GradeLevelController;
 use App\Http\Controllers\students\PrivateImageController;
+use App\Http\Controllers\School\ReEnrollmentPeriodController;
+use App\Http\Controllers\School\ReEnrollmentApplicationController;
 use App\Http\Controllers\School\AcademicYearController;
 //resources
 use Illuminate\Http\Request;
@@ -128,6 +132,15 @@ Route::prefix('admissions')->group(function () {
         Route::post('/{preEnrollment}/resent-pdf-folio', [PreEnrollmentController::class, 'resentPdfFolio']);
     })->middleware('auth:sanctum', 'verified');
 
+
+    //Promotion routes
+    Route::prefix('enrollments')->middleware(['auth:sanctum', 'verified', 'permission:manage admission cycles'])->group(function () {
+        Route::get('/pending-decisions', [EnrollmentPromotionController::class, 'pendingDecisions']);
+        Route::patch('/{enrollment}/promotion-decision', [EnrollmentPromotionController::class, 'updateDecision']);
+        Route::post('/first-grade-group-assignment', [FirstGradeGroupAssignmentController::class, 'assign']);
+    });
+});
+
 /**
  * Academic years / annual processes
  */
@@ -146,6 +159,30 @@ Route::prefix('academic-years')
             ->middleware('permission:manage re-enrollment');
         Route::delete('/{academicYear}', [AcademicYearController::class, 'destroy'])
             ->middleware('permission:manage re-enrollment');
+        Route::post('/promote', [AcademicYearPromotionController::class, 'promote'])
+            ->middleware('permission:manage admission cycles|manage re-enrollment');
+    });
+
+/**
+ * School — Re-enrollment process
+ */
+Route::prefix('school/re-enrollment')
+    ->middleware(['auth:sanctum', 'verified', 'permission:manage re-enrollment'])
+    ->group(function () {
+        Route::get('/periods', [ReEnrollmentPeriodController::class, 'index']);
+        Route::post('/periods', [ReEnrollmentPeriodController::class, 'store']);
+        Route::get('/periods/{period}', [ReEnrollmentPeriodController::class, 'show']);
+        Route::patch('/periods/{period}', [ReEnrollmentPeriodController::class, 'update']);
+        Route::patch('/periods/{period}/open', [ReEnrollmentPeriodController::class, 'open']);
+        Route::patch('/periods/{period}/close', [ReEnrollmentPeriodController::class, 'close']);
+        Route::get('/periods/{period}/dashboard', [ReEnrollmentPeriodController::class, 'dashboard']);
+        Route::get('/periods/{period}/history', [ReEnrollmentPeriodController::class, 'history']);
+        Route::post('/periods/{period}/advance-step', [ReEnrollmentPeriodController::class, 'advanceStep']);
+        Route::post('/periods/{period}/promote', [ReEnrollmentPeriodController::class, 'promote']);
+        Route::post('/periods/{period}/finalize', [ReEnrollmentPeriodController::class, 'finalize']);
+
+        Route::get('/periods/{period}/applications', [ReEnrollmentApplicationController::class, 'index']);
+        Route::patch('/periods/{period}/applications/{application}', [ReEnrollmentApplicationController::class, 'update']);
     });
 
 /**

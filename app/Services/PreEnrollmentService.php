@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Jobs\SendPreEnrollmentEmailJob;
 use App\Models\Admission\AdmissionCycle;
 use App\Models\PreEnrollment;
+use App\Models\User;
+use App\Notifications\PreEnrollmentCreatedNotification;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -12,16 +14,21 @@ use Illuminate\Support\Facades\URL;
 
 class PreEnrollmentService
 {
+    public function __construct(
+        private NotificationDispatchService $notificationDispatchService
+    ) {}
     /**
      * Creates a new pre-enrollment with its PDF and schedules the email.
      *
      * @param  array  $data  Validated request data
      * @return array ['folio' => string, 'downloadUrl' => string]
      */
-    public function createPreEnrollment(array $data, ?int $cycleId = null): array
+    public function createPreEnrollment(array $data, ?int $cycleId = null, ?User $createdBy = null): array
     {
         // 1. Create record in database
         $preEnrollment = $this->storePreEnrollment($data, $cycleId);
+
+        $this->notifyPreEnrollmentCreated($preEnrollment, $createdBy);
 
         // 2. Generate and store PDF (synchronous to have immediate download URL)
         $pdfPath = $this->generateAndStorePdf($preEnrollment);
@@ -36,6 +43,17 @@ class PreEnrollmentService
             'folio' => $preEnrollment->folio,
             'downloadUrl' => $signedUrl,
         ];
+    }
+
+    private function notifyPreEnrollmentCreated(PreEnrollment $preEnrollment, ?User $createdBy): void
+    {
+        $source = $createdBy ? 'admin' : 'public';
+
+        $this->notificationDispatchService->notifyUsersWithPermission(
+            'view pre-enrollments',
+            new PreEnrollmentCreatedNotification($preEnrollment, $source),
+            $createdBy
+        );
     }
 
     /**

@@ -69,6 +69,12 @@ class AdmissionCycleController extends Controller implements HasMiddleware
             ], 422);
         }
 
+        if ($cycle->end_at->lte(now())) {
+            return response()->json([
+                'message' => 'No se puede activar un periodo vencido. Actualiza la fecha de fin o reábrelo con nueva fecha.',
+            ], 422);
+        }
+
         DB::transaction(function () use ($cycle) {
 
             $activeExists = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)

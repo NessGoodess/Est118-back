@@ -38,6 +38,7 @@ class UpdatePreEnrollmentRequest extends FormRequest
             'place_of_birth' => 'required|string|max:100',
             'previous_school' => 'required|string|max:100',
             'current_average' => 'required|numeric|between:0,10',
+            'admission_exam_score' => 'nullable|numeric|between:0,10',
             'has_siblings' => 'required|boolean',
             'siblings_details' => 'nullable|string|max:255',
             'street_type' => 'required|string|max:100',

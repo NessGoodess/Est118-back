@@ -36,7 +36,9 @@ class Guardian extends Model
      */
     public function students(): BelongsToMany
     {
-        return $this->belongsToMany(Student::class, 'guardian_student');
+        return $this->belongsToMany(Student::class, 'guardian_student')
+            ->withPivot('relationship')
+            ->withTimestamps();
     }
 
     protected static function booted()

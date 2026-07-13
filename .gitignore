@@ -27,3 +27,4 @@ Thumbs.db
 database/seeders/test/
 app/Console/Commands/GenerateSeederFromCsv.php
 
+/storage

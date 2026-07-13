@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Enums\AdmissionCycleStatus;
 use App\Http\Requests\StorePreEnrollmentRequest;
 use App\Http\Requests\UpdatePreEnrollmentRequest;
+use App\Http\Requests\ConvertPreEnrollmentToStudentRequest;
+use App\Http\Requests\UpdatePreEnrollmentProcessRequest;
 use App\Http\Resources\PreEnrollmentListResource;
 use App\Models\Admission\AdmissionCycle;
 use App\Models\PreEnrollment;
+use App\Services\ConvertPreEnrollmentToStudentService;
 use App\Services\PreEnrollmentService;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -19,14 +22,15 @@ use Illuminate\Support\Facades\Storage;
 class PreEnrollmentController extends Controller implements HasMiddleware
 {
     public function __construct(
-        private PreEnrollmentService $preEnrollmentService
+        private PreEnrollmentService $preEnrollmentService,
+        private ConvertPreEnrollmentToStudentService $convertPreEnrollmentService
     ) {}
 
     public static function middleware(): array
     {
         return [
             new Middleware('permission:view pre-enrollments')->only(['index', 'show']),
-            new Middleware('permission:edit pre-enrollments')->only(['update']),
+            new Middleware('permission:edit pre-enrollments')->only(['update', 'updateProcess', 'convertToStudent']),
             new Middleware('permission:create pre-enrollments')->only(['storeByAdmin']),
         ];
     }
@@ -112,7 +116,11 @@ class PreEnrollmentController extends Controller implements HasMiddleware
     {
         try {
             $cycleId = $request->input('admission_cycle_id') ? (int) $request->input('admission_cycle_id') : null;
-            $result = $this->preEnrollmentService->createPreEnrollment($request->validated(), $cycleId);
+            $result = $this->preEnrollmentService->createPreEnrollment(
+                $request->validated(),
+                $cycleId,
+                $request->user()
+            );
 
             return response()->json([
                 'folio' => $result['folio'],
@@ -139,6 +147,45 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         $preEnrollment->update($request->validated());
 
         return response()->json($preEnrollment->fresh());
+    }
+
+    /**
+     * Update only process fields (status, documents_status, payment_status).
+     */
+    public function updateProcess(UpdatePreEnrollmentProcessRequest $request, PreEnrollment $preEnrollment)
+    {
+        $preEnrollment->update($request->validated());
+        return response()->json($preEnrollment->fresh());
+    }
+
+    /**
+     * Convert pre-enrollment to student + enrollment (1° provisional group).
+     */
+    public function convertToStudent(
+        ConvertPreEnrollmentToStudentRequest $request,
+        PreEnrollment $preEnrollment
+    ) {
+        try {
+            $payload = $this->convertPreEnrollmentService->convert(
+                $preEnrollment,
+                $request->filled('academic_year_id') ? $request->integer('academic_year_id') : null,
+                $request->filled('class_group_id') ? $request->integer('class_group_id') : null,
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Estudiante inscrito correctamente.',
+                'data' => [
+                    'student_id' => $payload['student']->id,
+                    'enrollment_id' => $payload['enrollment']->id,
+                ],
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
     }
 
     /**

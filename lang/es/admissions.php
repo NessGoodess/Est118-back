@@ -31,4 +31,17 @@ return [
      'created_success' => 'Preinscripción creada exitosamente',
 
      'no_active_cycle' => 'No hay un ciclo activo',
+
+     'ToStudent' => [
+        "already_student" => 'Esta preinscripción ya ha sido convertida a estudiante',
+        "documents_not_ready" => 'Los docuemntos deben estar marcados como completos',
+        "payment_not_validated" => 'El pago debe estar validado antes de inscribir',
+        "rejected" => 'No se puede inscribir una preinscripción rechazada',
+        "profile_exists" => 'Ya existe una persona/alumno registrado con el CURP del aspirante',
+        "no_academic_year" => 'No hay un ciclo escolar seleccionado o activo',
+        "group_not_in_academic_year" => 'El grupo no pertenece al ciclo escolar indicado',
+        "no_catalog_1_grade" => 'No se encontró el grado «1°» en el catálogo.',
+        "no_group_1_grade" => 'No existe un grupo provisional de 1° para este ciclo. Crea los grupos o envía class_group_id.',
+        "already_enrolled" => 'El estudiante ya tiene matricula activa en ese ciclo.',
+     ]
 ];

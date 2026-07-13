@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\DocumentsStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\PreEnrollmentStatus;
 use App\Models\Admission\AdmissionCycle;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,6 +18,9 @@ class PreEnrollment extends Model
 
     protected $fillable = [
         'admission_cycle_id',
+        'status',
+        'documents_status',
+        'payment_status',
         'contact_email',
         'first_name',
         'last_name',
@@ -28,6 +34,7 @@ class PreEnrollment extends Model
         'place_of_birth',
         'previous_school',
         'current_average',
+        'admission_exam_score',
         'has_siblings',
         'siblings_details',
         'street_type',
@@ -54,12 +61,23 @@ class PreEnrollment extends Model
         'address_proof_path',
         'study_certificate_path',
         'photo_path',
+        'converted_student_id',
     ];
 
     protected $casts = [
         'has_siblings' => 'boolean',
         'has_school_voucher' => 'boolean',
+        'status' => PreEnrollmentStatus::class,
+        'documents_status' => DocumentsStatus::class,
+        'payment_status' => PaymentStatus::class,
+        'current_average' => 'decimal:2',
+        'admission_exam_score' => 'decimal:2',
     ];
+
+    public function convertedStudent(): BelongsTo
+    {
+        return $this->belongsTo(Student::class, 'converted_student_id');
+    }
 
     protected static function booted()
     {

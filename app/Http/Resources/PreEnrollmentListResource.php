@@ -17,6 +17,10 @@ class PreEnrollmentListResource extends JsonResource
         return [
             'id' => $this->id,
             'folio' => $this->folio,
+            'status' => $this->status,
+            'documents_status' => $this->documents_status,
+            'payment_status' => $this->payment_status,
+            'converted_student_id' => $this->converted_student_id,
             'full_name' => trim("{$this->first_name} {$this->last_name} {$this->second_last_name}"),
             'curp' => $this->curp,
             'gender' => $this->gender,

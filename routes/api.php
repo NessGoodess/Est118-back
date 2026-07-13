@@ -20,6 +20,7 @@ use App\Http\Controllers\Admission\PreEnrollmentExportController;
 use App\Http\Controllers\students\GradeLevelController;
 use App\Http\Controllers\students\PrivateImageController;
 use App\Http\Controllers\StudentCredentialPrintingController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\School\ReEnrollmentPeriodController;
 use App\Http\Controllers\School\ReEnrollmentApplicationController;
 use App\Http\Controllers\School\AcademicYearController;
@@ -32,6 +33,13 @@ use App\Http\Resources\UserResource;
  * Routes
  * ___________________________________________________________________________
  */
+Route::prefix('notifications')->middleware(['auth:sanctum', 'verified'])->group(function () {
+    Route::get('/', [NotificationController::class, 'index']);
+    Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::patch('/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::post('/read-all', [NotificationController::class, 'markAllAsRead']);
+});
+
 Route::middleware(['auth:sanctum', 'verified'])->get('/user', function (Request $request) {
     $user = $request->user();
     $user->load('roles.permissions', 'permissions');

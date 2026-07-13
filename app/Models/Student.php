@@ -44,7 +44,9 @@ class Student extends Model
      */
     public function guardians(): BelongsToMany
     {
-        return $this->belongsToMany(Guardian::class, 'guardian_student');
+        return $this->belongsToMany(Guardian::class, 'guardian_student')
+            ->withPivot('relationship')
+            ->withTimestamps();
     }
 
     /**
@@ -188,10 +190,10 @@ class Student extends Model
      *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
      */
-    public function workshops()
+    public function workshops(): BelongsToMany
     {
         return $this->belongsToMany(Workshop::class, 'workshop_enrollments')
-            ->withPivot('academic_year_id');
+            ->withPivot(['academic_year_id', 'grade_level_id', 'group_number']);
     }
 
     /**
@@ -243,5 +245,15 @@ class Student extends Model
         return $this->hasOne(Enrollment::class)
             ->where('status', 'active')
             ->latest();
+    }
+
+    /**
+     * Seguimiento de credenciales / entrega por ciclo escolar.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     */
+    public function credentialTrackings(): HasMany
+    {
+        return $this->hasMany(StudentCredentialTracking::class);
     }
 }

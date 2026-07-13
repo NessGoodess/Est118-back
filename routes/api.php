@@ -13,11 +13,13 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\EnrollmentPromotionController;
 use App\Http\Controllers\AcademicYearPromotionController;
+use App\Http\Controllers\FirstGradeGroupAssignmentController;
 //enums
 use App\Enums\ServiceAbility;
 use App\Http\Controllers\Admission\PreEnrollmentExportController;
 use App\Http\Controllers\students\GradeLevelController;
 use App\Http\Controllers\students\PrivateImageController;
+use App\Http\Controllers\StudentCredentialPrintingController;
 use App\Http\Controllers\School\ReEnrollmentPeriodController;
 use App\Http\Controllers\School\ReEnrollmentApplicationController;
 use App\Http\Controllers\School\AcademicYearController;
@@ -129,6 +131,8 @@ Route::prefix('admissions')->group(function () {
         Route::get('/export', [PreEnrollmentExportController::class, 'export']);
         Route::get('/{preEnrollment}', [PreEnrollmentController::class, 'show']);
         Route::patch('/{preEnrollment}', [PreEnrollmentController::class, 'update']);
+        Route::patch('/{preEnrollment}/process', [PreEnrollmentController::class, 'updateProcess']);
+        Route::post('/{preEnrollment}/convert-student', [PreEnrollmentController::class, 'convertToStudent']);
         Route::post('/{preEnrollment}/resent-pdf-folio', [PreEnrollmentController::class, 'resentPdfFolio']);
     })->middleware('auth:sanctum', 'verified');
 
@@ -246,6 +250,20 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
 
     Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
 
+    Route::prefix('credentials')->group(function () {
+        Route::get('grades/{grade}/class-groups', [StudentCredentialPrintingController::class, 'classGroupsForGrade'])
+            ->whereNumber('grade')
+            ->middleware('permission:view students');
+        Route::get('class-groups/{classGroup}/rows', [StudentCredentialPrintingController::class, 'rows'])
+            ->middleware('permission:view students');
+        Route::get('class-groups/{classGroup}/export', [StudentCredentialPrintingController::class, 'exportExcel'])
+            ->middleware('permission:view students');
+        Route::get('class-groups/{classGroup}/photos-zip', [StudentCredentialPrintingController::class, 'photosZip'])
+            ->middleware('permission:view students');
+        Route::patch('{student}/tracking', [StudentCredentialPrintingController::class, 'updateTracking'])
+            ->whereNumber('student')
+            ->middleware('permission:edit students');
+    });
 
     Route::get('/', [StudentController::class, 'index'])
         ->middleware('permission:view students');
@@ -263,6 +281,12 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
         ->middleware('permission:edit students');
 
     Route::post('/{student}/resend-verification', [StudentController::class, 'resendVerification'])
+        ->middleware('permission:edit students');
+
+    Route::get('/{student}/photo-status', [StudentController::class, 'photoStatus'])
+        ->middleware('permission:view students');
+
+    Route::post('/{student}/photo', [StudentController::class, 'uploadPhoto'])
         ->middleware('permission:edit students');
 });
 

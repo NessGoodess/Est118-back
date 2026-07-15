@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admission\AdmissionCycleController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\NfcCredentialController;
+use App\Http\Controllers\NfcReaderSlotController;
 use App\Http\Controllers\Admission\PreEnrollmentController;
 use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\StudentController;
@@ -82,6 +83,13 @@ Route::prefix('reader')->group(function () {
     // Reader status (Synchronization)
     Route::get('/status', [NfcCredentialController::class, 'readerStatus'])
         ->middleware(['auth:sanctum', 'verified']);
+
+    Route::middleware(['auth:sanctum', 'verified'])->group(function () {
+        Route::get('/slots', [NfcReaderSlotController::class, 'index']);
+        Route::patch('/slots/{slot}', [NfcReaderSlotController::class, 'update']);
+        Route::patch('/slots/{slot}/arm', [NfcReaderSlotController::class, 'arm']);
+        Route::post('/slots/arm-all', [NfcReaderSlotController::class, 'armAll']);
+    });
 });
 
 /**

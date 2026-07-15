@@ -9,16 +9,22 @@ use App\Models\Enrollment;
 use App\Models\GeneralAttendance;
 use App\Models\RecentReading;
 use App\Models\Student;
+use App\Services\NfcReaderSlotService;
+use App\Services\StudentPhotoPathService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\URL;
 
 class NfcCredentialController extends Controller
 {
     private const ENTRY_LATE_CUTOFF = '07:00';
 
     private const EXIT_EARLIEST = '13:30';
+
+    public function __construct(
+        private readonly NfcReaderSlotService $slotService,
+        private readonly StudentPhotoPathService $photoPathService
+    ) {}
 
     /**
      * Handle NFC credential read events from the reader.
@@ -28,10 +34,10 @@ class NfcCredentialController extends Controller
         $data = $request->all();
         $eventType = $data['event'] ?? null;
 
-        $payload = [
+        $payload = $this->slotService->enrichPayload($data, [
             'reader' => $data['reader'] ?? 'NFC Reader',
             'timestamp' => now()->toIso8601String(),
-        ];
+        ]);
 
         try {
             switch ($eventType) {
@@ -79,6 +85,15 @@ class NfcCredentialController extends Controller
      */
     private function handleCardInserted(array $data, array $payload): array
     {
+        if (array_key_exists('reader_armed', $payload) && $payload['reader_armed'] === false) {
+            return $payload + [
+                'event' => 'card_inserted',
+                'status' => 'warning',
+                'message' => 'Lector en pausa. Active las lecturas para registrar asistencia.',
+                'student' => null,
+            ];
+        }
+
         $credentialId = $data['credential_id'] ?? null;
 
         if (! $credentialId || $credentialId === 'Null') {
@@ -218,31 +233,17 @@ class NfcCredentialController extends Controller
     {
         $grade = $enrollment->classGroup?->gradeLevel?->name;
         $group = $enrollment->classGroup?->name;
-        $version = $enrollment->student->profile?->updated_at?->timestamp
-            ?? $enrollment->student->updated_at?->timestamp
-            ?? now()->timestamp;
         $name = trim(
             ($enrollment->student->profile?->first_name ?? '') . ' ' .
                 ($enrollment->student->profile?->last_name ?? '')
         );
-        $photo = $enrollment->student->profile?->profile_picture;
-
-        $photoPath = $photo
-            ? URL::temporarySignedRoute(
-                'private.image',
-                now()->addMinutes(60),
-                [
-                    'id' => $enrollment->student->id,
-                    'size' => 'profile',
-                    'v' => $version
-                ]
-            ) : null;
 
         return [
             'id' => $enrollment->student->id,
             'credential_id' => $enrollment->student->credential_id,
             'name' => $name,
-            'photo_url' => $photoPath,
+            'photo_url' => $this->photoPathService->signedUrl($enrollment->student, 'profile'),
+            'gender' => $enrollment->student->profile?->gender,
             'grade' => $grade,
             'group' => $group,
             'registered_at' => now()->toIso8601String(),
@@ -285,11 +286,13 @@ class NfcCredentialController extends Controller
      */
     private function handleReaderStatusChanged(array $data, array $payload): array
     {
+        $readers = $this->slotService->buildReaderStatusList($data['readers'] ?? []);
+
         $status = $payload + [
             'event' => 'reader_status_changed',
             'connected' => (bool) ($data['connected'] ?? false),
             'ready' => (bool) ($data['ready'] ?? false),
-            'readers' => $data['readers'] ?? [],
+            'readers' => $readers,
             'timestamp' => now()->toIso8601String(),
         ];
 
@@ -308,7 +311,7 @@ class NfcCredentialController extends Controller
             'event' => 'reader_status_changed',
             'connected' => false,
             'ready' => false,
-            'readers' => [],
+            'readers' => $this->slotService->buildReaderStatusList([]),
             'timestamp' => now()->toIso8601String(),
         ]);
 

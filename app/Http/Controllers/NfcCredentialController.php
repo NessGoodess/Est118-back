@@ -2,32 +2,26 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\AttendanceSource;
 use App\Events\CredentialReadEvent;
-use App\Jobs\SendTelegramNotificationJob;
-use App\Models\Enrollment;
-use App\Models\GeneralAttendance;
-use App\Models\RecentReading;
-use App\Models\Student;
+use App\Jobs\ProcessNfcReadJob;
+use App\Models\NfcReadEvent;
 use App\Services\NfcReaderSlotService;
-use App\Services\StudentPhotoPathService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class NfcCredentialController extends Controller
 {
-    private const ENTRY_LATE_CUTOFF = '07:00';
-
-    private const EXIT_EARLIEST = '13:30';
-
     public function __construct(
-        private readonly NfcReaderSlotService $slotService,
-        private readonly StudentPhotoPathService $photoPathService
+        private readonly NfcReaderSlotService $slotService
     ) {}
 
     /**
      * Handle NFC credential read events from the reader.
+     *
+     * card_inserted: persisted + queued (idempotent by client_event_id).
+     * Other events: processed synchronously.
      */
     public function read(Request $request)
     {
@@ -40,11 +34,11 @@ class NfcCredentialController extends Controller
         ]);
 
         try {
-            switch ($eventType) {
-                case 'card_inserted':
-                    $payload = $this->handleCardInserted($data, $payload);
-                    break;
+            if ($eventType === 'card_inserted') {
+                return $this->enqueueCardInserted($data, $payload);
+            }
 
+            switch ($eventType) {
                 case 'card_removed':
                     $payload = $this->handleCardRemoved($payload);
                     break;
@@ -69,7 +63,7 @@ class NfcCredentialController extends Controller
             broadcast(new CredentialReadEvent([
                 'event' => 'error',
                 'status' => 'error',
-                'message' => 'Error interno: ' . $e->getMessage(),
+                'message' => 'Error interno: '.$e->getMessage(),
                 'timestamp' => now()->toIso8601String(),
             ]));
 
@@ -81,192 +75,78 @@ class NfcCredentialController extends Controller
     }
 
     /**
-     * Handle card inserted event.
+     * Idempotent ingest for card reads. ACK fast; ProcessNfcReadJob does the work.
      */
-    private function handleCardInserted(array $data, array $payload): array
+    private function enqueueCardInserted(array $data, array $enrichedBase): \Illuminate\Http\JsonResponse
     {
-        if (array_key_exists('reader_armed', $payload) && $payload['reader_armed'] === false) {
-            return $payload + [
-                'event' => 'card_inserted',
-                'status' => 'warning',
-                'message' => 'Lector en pausa. Active las lecturas para registrar asistencia.',
-                'student' => null,
-            ];
-        }
+        $clientEventId = (string) ($data['client_event_id'] ?? Str::uuid());
 
-        $credentialId = $data['credential_id'] ?? null;
-
-        if (! $credentialId || $credentialId === 'Null') {
-            return $payload + [
-                'event' => 'card_inserted',
-                'status' => 'warning',
-                'message' => 'Credencial vacía o ilegible.',
-                'student' => null,
-            ];
-        }
-
-        $enrollment = Enrollment::with([
-            'student',
-            'student.profile',
-            'classGroup.gradeLevel',
-            'academicYear:id',
-        ])
-            ->where('status', 'active')
-            ->whereHas('student', fn($q) => $q->where('credential_id', $credentialId))
+        $existing = NfcReadEvent::query()
+            ->where('client_event_id', $clientEventId)
             ->first();
 
-        if (! $enrollment) {
-            return $payload + [
-                'event' => 'card_inserted',
-                'credential_id' => $credentialId,
-                'status' => 'warning',
-                'message' => 'Credencial no registrada.',
-                'student' => null,
-            ];
-        }
-
-        $today = now()->toDateString();
-        $currentTime = now();
-        $student = $enrollment->student;
-
-        $todayAttendance = GeneralAttendance::where('student_id', $student->id)
-            ->where('date', $today)
-            ->first();
-
-        $studentData = $this->buildStudentData($enrollment);
-
-        if (! $todayAttendance) {
-            $status = $this->isLateEntry($currentTime) ? 'late' : 'present';
-            $attendance = GeneralAttendance::create([
-                'student_id' => $student->id,
-                'academic_year_id' => $enrollment->academicYear->id,
-                'date' => $today,
-                'scanned_at' => $currentTime,
-                'entry_at' => $currentTime,
-                'status' => $status,
-                'source' => AttendanceSource::NFC,
-            ]);
-
-            $this->recordRecentReading($student->id, $credentialId, 'entry', $status === 'late' ? 'Entrada tardía registrada' : 'Entrada registrada.');
-            $this->dispatchGuardianNotifications($enrollment, $studentData, $currentTime, 'entry');
-
-            $message = $status === 'late' ? 'Entrada tardía registrada' : 'Tarjeta reconocida correctamente.';
-
-            return $payload + [
-                'event' => 'card_inserted',
-                'credential_id' => $credentialId,
-                'status' => 'ok',
-                'student' => array_merge($studentData, ['type' => 'entry']),
-                'message' => $message,
-            ];
-        }
-
-        if (! $todayAttendance->exit_at) {
-            if ($this->canRegisterExit($currentTime)) {
-                $todayAttendance->update(['exit_at' => $currentTime]);
-
-                $this->recordRecentReading($student->id, $credentialId, 'exit', 'Salida registrada.');
-                $this->dispatchGuardianNotifications($enrollment, $studentData, $currentTime, 'exit');
-
-                return $payload + [
-                    'event' => 'card_inserted',
-                    'credential_id' => $credentialId,
+        if ($existing) {
+            if ($existing->status === NfcReadEvent::STATUS_PROCESSED && is_array($existing->result_payload)) {
+                return response()->json([
                     'status' => 'ok',
-                    'student' => array_merge($studentData, ['type' => 'exit']),
-                    'message' => 'Salida registrada.',
-                ];
+                    'duplicate' => true,
+                    'client_event_id' => $clientEventId,
+                    'payload' => $existing->result_payload,
+                ]);
             }
 
-            $this->recordRecentReading($student->id, $credentialId, 'ignored', 'No es horario de salida.');
+            if ($existing->status === NfcReadEvent::STATUS_PENDING
+                || $existing->status === NfcReadEvent::STATUS_PROCESSING) {
+                return response()->json([
+                    'status' => 'accepted',
+                    'duplicate' => true,
+                    'client_event_id' => $clientEventId,
+                ], 202);
+            }
 
-            return $payload + [
-                'event' => 'card_inserted',
-                'credential_id' => $credentialId,
-                'status' => 'warning',
-                'student' => $studentData,
-                'message' => 'No es horario de salida. Intente después de las ' . self::EXIT_EARLIEST,
-            ];
+            // Retry failed events
+            $existing->update([
+                'status' => NfcReadEvent::STATUS_PENDING,
+                'error_message' => null,
+                'request_payload' => $data,
+            ]);
+            $this->dispatchProcessJob($existing->id);
+
+            return response()->json([
+                'status' => 'accepted',
+                'retried' => true,
+                'client_event_id' => $clientEventId,
+            ], 202);
         }
 
-        $this->recordRecentReading($student->id, $credentialId, 'duplicate', 'Ya tiene registro completo hoy.');
-
-        return $payload + [
-            'event' => 'card_inserted',
-            'credential_id' => $credentialId,
-            'status' => 'info',
-            'student' => $studentData,
-            'message' => 'Ya tiene registro completo hoy.',
-        ];
-    }
-
-    private function isLateEntry(\DateTimeInterface $time): bool
-    {
-        $cutoff = \DateTime::createFromFormat('H:i', self::ENTRY_LATE_CUTOFF);
-        $compare = \DateTime::createFromFormat('H:i', $time->format('H:i'));
-
-        return $compare > $cutoff;
-    }
-
-    private function canRegisterExit(\DateTimeInterface $time): bool
-    {
-        $earliest = \DateTime::createFromFormat('H:i', self::EXIT_EARLIEST);
-        $compare = \DateTime::createFromFormat('H:i', $time->format('H:i'));
-
-        return $compare >= $earliest;
-    }
-
-    private function recordRecentReading(int $studentId, ?string $credentialId, string $event, string $message): void
-    {
-        RecentReading::create([
-            'student_id' => $studentId,
-            'read_at' => now(),
-            'event' => $event,
-            'message' => $message,
-            'credential_id' => $credentialId,
+        $event = NfcReadEvent::create([
+            'client_event_id' => $clientEventId,
+            'event_type' => 'card_inserted',
+            'credential_id' => $data['credential_id'] ?? null,
+            'reader_slot_code' => $enrichedBase['reader_slot_code'] ?? ($data['reader_slot_code'] ?? null),
+            'reader_pcsc' => $enrichedBase['reader_pcsc'] ?? ($data['reader'] ?? null),
+            'request_payload' => $data,
+            'status' => NfcReadEvent::STATUS_PENDING,
         ]);
+
+        $this->dispatchProcessJob($event->id);
+
+        return response()->json([
+            'status' => 'accepted',
+            'client_event_id' => $clientEventId,
+            'nfc_read_event_id' => $event->id,
+        ], 202);
     }
 
-    /**
-     * Build student data array from enrollment.
-     */
-    private function buildStudentData(Enrollment $enrollment): array
+    private function dispatchProcessJob(int $nfcReadEventId): void
     {
-        $grade = $enrollment->classGroup?->gradeLevel?->name;
-        $group = $enrollment->classGroup?->name;
-        $name = trim(
-            ($enrollment->student->profile?->first_name ?? '') . ' ' .
-                ($enrollment->student->profile?->last_name ?? '')
-        );
+        $inline = config('queue.default') === 'sync'
+            || filter_var(env('NFC_INLINE_PROCESS', false), FILTER_VALIDATE_BOOLEAN);
 
-        return [
-            'id' => $enrollment->student->id,
-            'credential_id' => $enrollment->student->credential_id,
-            'name' => $name,
-            'photo_url' => $this->photoPathService->signedUrl($enrollment->student, 'profile'),
-            'gender' => $enrollment->student->profile?->gender,
-            'grade' => $grade,
-            'group' => $group,
-            'registered_at' => now()->toIso8601String(),
-        ];
-    }
-
-    /**
-     * Dispatch Telegram notifications to guardians.
-     */
-    private function dispatchGuardianNotifications(Enrollment $enrollment, array $studentData, \DateTimeInterface $registrationTime, string $type): void
-    {
-        $guardians = $enrollment->student
-            ->guardians()
-            ->whereNotNull('telegram_id')
-            ->get();
-
-        foreach ($guardians as $guardian) {
-            SendTelegramNotificationJob::dispatch(
-                $guardian->telegram_id,
-                $studentData,
-                $registrationTime,
-                $type
-            );
+        if ($inline) {
+            ProcessNfcReadJob::dispatchSync($nfcReadEventId);
+        } else {
+            ProcessNfcReadJob::dispatch($nfcReadEventId);
         }
     }
 
@@ -280,51 +160,43 @@ class NfcCredentialController extends Controller
         ];
     }
 
-    /**
-     * Handle reader connection status (connected / disconnected).
-     * Broadcast so the frontend can show reader status.
-     */
     private function handleReaderStatusChanged(array $data, array $payload): array
     {
         $readers = $this->slotService->buildReaderStatusList($data['readers'] ?? []);
+        $anySlotConnected = collect($readers)->contains(fn (array $r) => $r['connected'] === true);
 
         $status = $payload + [
             'event' => 'reader_status_changed',
-            'connected' => (bool) ($data['connected'] ?? false),
+            'connected' => $anySlotConnected || (bool) ($data['connected'] ?? false),
             'ready' => (bool) ($data['ready'] ?? false),
             'readers' => $readers,
             'timestamp' => now()->toIso8601String(),
         ];
 
-        // Save current state for frontend synchronization
         Cache::put('nfc_reader_status', $status, now()->addHours(2));
 
         return $status;
-    }
-
-    /**
-     * Return the last known reader status from cache.
-     */
-    public function readerStatus()
-    {
-        $status = Cache::get('nfc_reader_status', [
-            'event' => 'reader_status_changed',
-            'connected' => false,
-            'ready' => false,
-            'readers' => $this->slotService->buildReaderStatusList([]),
-            'timestamp' => now()->toIso8601String(),
-        ]);
-
-        return response()->json($status);
     }
 
     private function handleUnknownEvent(array $payload): array
     {
         return $payload + [
             'event' => 'unknown',
-            'status' => 'error',
-            'message' => 'Evento no reconocido o no enviado por el lector.',
-            'student' => null,
+            'status' => 'warning',
+            'message' => 'Evento desconocido.',
         ];
+    }
+
+    public function readerStatus()
+    {
+        $status = Cache::get('nfc_reader_status', [
+            'event' => 'reader_status_changed',
+            'connected' => false,
+            'ready' => false,
+            'readers' => [],
+            'timestamp' => now()->toIso8601String(),
+        ]);
+
+        return response()->json($status);
     }
 }

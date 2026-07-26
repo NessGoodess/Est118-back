@@ -31,10 +31,21 @@ class NfcCredentialController extends Controller
         $payload = $this->slotService->enrichPayload($data, [
             'reader' => $data['reader'] ?? 'NFC Reader',
             'timestamp' => now()->toIso8601String(),
-        ]);
+        ], allowPairing: true);
 
         try {
             if ($eventType === 'card_inserted') {
+                $blocked = $this->blockAttendanceIfNotOperational($payload);
+                if ($blocked !== null) {
+                    broadcast(new CredentialReadEvent($blocked));
+
+                    return response()->json([
+                        'status' => 'ok',
+                        'ignored' => true,
+                        'payload' => $blocked,
+                    ]);
+                }
+
                 return $this->enqueueCardInserted($data, $payload);
             }
 
@@ -72,6 +83,46 @@ class NfcCredentialController extends Controller
                 'message' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Pairing taps, unbound readers and paused panels must not enqueue attendance.
+     *
+     * @return array<string, mixed>|null Payload to broadcast when blocked; null to continue.
+     */
+    private function blockAttendanceIfNotOperational(array $payload): ?array
+    {
+        if (! empty($payload['pairing_completed'])) {
+            return $payload + [
+                'event' => 'card_inserted',
+                'status' => 'info',
+                'message' => $payload['message'] ?? 'Lector emparejado correctamente.',
+                'student' => null,
+                'attendance_skipped' => true,
+            ];
+        }
+
+        if (empty($payload['reader_slot_id'])) {
+            return $payload + [
+                'event' => 'card_inserted',
+                'status' => 'warning',
+                'message' => 'Lector no emparejado. Asigna el PC/SC a un panel en Lectores antes de pasar credenciales.',
+                'student' => null,
+                'attendance_skipped' => true,
+            ];
+        }
+
+        if (array_key_exists('reader_armed', $payload) && $payload['reader_armed'] === false) {
+            return $payload + [
+                'event' => 'card_inserted',
+                'status' => 'warning',
+                'message' => 'Lector en pausa. Active las lecturas para registrar asistencia.',
+                'student' => null,
+                'attendance_skipped' => true,
+            ];
+        }
+
+        return null;
     }
 
     /**
@@ -162,6 +213,7 @@ class NfcCredentialController extends Controller
 
     private function handleReaderStatusChanged(array $data, array $payload): array
     {
+        $connectedPcsc = $this->slotService->listConnectedPcscNames($data['readers'] ?? []);
         $readers = $this->slotService->buildReaderStatusList($data['readers'] ?? []);
         $anySlotConnected = collect($readers)->contains(fn (array $r) => $r['connected'] === true);
 
@@ -170,10 +222,13 @@ class NfcCredentialController extends Controller
             'connected' => $anySlotConnected || (bool) ($data['connected'] ?? false),
             'ready' => (bool) ($data['ready'] ?? false),
             'readers' => $readers,
+            'connected_pcsc' => $connectedPcsc,
+            'unbound_pcsc' => $this->slotService->listUnboundPcscNames($connectedPcsc),
+            'pairing' => $this->slotService->getPairingSession(),
             'timestamp' => now()->toIso8601String(),
         ];
 
-        Cache::put('nfc_reader_status', $status, now()->addHours(2));
+        Cache::put(NfcReaderSlotService::STATUS_CACHE_KEY, $status, now()->addHours(2));
 
         return $status;
     }
@@ -189,11 +244,14 @@ class NfcCredentialController extends Controller
 
     public function readerStatus()
     {
-        $status = Cache::get('nfc_reader_status', [
+        $status = Cache::get(NfcReaderSlotService::STATUS_CACHE_KEY, [
             'event' => 'reader_status_changed',
             'connected' => false,
             'ready' => false,
             'readers' => [],
+            'connected_pcsc' => [],
+            'unbound_pcsc' => [],
+            'pairing' => null,
             'timestamp' => now()->toIso8601String(),
         ]);
 

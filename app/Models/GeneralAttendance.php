@@ -19,6 +19,7 @@ class GeneralAttendance extends Model
         'entry_at',
         'exit_at',
         'status',
+        'source',
         'absence_request_id',
     ];
 

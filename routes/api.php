@@ -86,8 +86,11 @@ Route::prefix('reader')->group(function () {
 
     Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         Route::get('/slots', [NfcReaderSlotController::class, 'index']);
+        Route::get('/config', [NfcReaderSlotController::class, 'config']);
         Route::patch('/slots/{slot}', [NfcReaderSlotController::class, 'update']);
         Route::patch('/slots/{slot}/arm', [NfcReaderSlotController::class, 'arm']);
+        Route::post('/slots/{slot}/start-pairing', [NfcReaderSlotController::class, 'startPairing']);
+        Route::post('/slots/cancel-pairing', [NfcReaderSlotController::class, 'cancelPairing']);
         Route::post('/slots/arm-all', [NfcReaderSlotController::class, 'armAll']);
     });
 });
@@ -97,6 +100,8 @@ Route::prefix('reader')->group(function () {
  * ___________________________________________________________________________
  */
 Route::prefix('attendance')->middleware(['auth:sanctum', 'verified'])->group(function () {
+    Route::get('/daily', [GeneralAttendanceController::class, 'daily']);
+    Route::get('/daily-statuses', [GeneralAttendanceController::class, 'dailyStatuses']);
     Route::get('/last-attendance', [GeneralAttendanceController::class, 'getLastAttendance']);
     Route::get('/all-attendances', [GeneralAttendanceController::class, 'index']);
     Route::get('/recent-readings', [GeneralAttendanceController::class, 'recentReadings']);

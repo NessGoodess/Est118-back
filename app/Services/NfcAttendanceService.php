@@ -3,32 +3,50 @@
 namespace App\Services;
 
 use App\Enums\AttendanceSource;
+use App\Enums\EnrollmentStatus;
+use App\Enums\GeneralAttendanceStatus;
 use App\Jobs\SendTelegramNotificationJob;
+use App\Models\AcademicYear;
 use App\Models\Enrollment;
 use App\Models\GeneralAttendance;
 use App\Models\RecentReading;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Business logic for NFC card_inserted events (entry/exit attendance).
+ * Business logic for NFC card_inserted events.
+ *
+ * Same physical readers handle entry and exit; the active mode is decided by
+ * AttendanceRulesService time windows, not by reader_direction.
+ *
+ * general_attendances = source of truth for attendance
+ * recent_readings     = identification / event log (always written when processed)
  */
 class NfcAttendanceService
 {
-    private const ENTRY_LATE_CUTOFF = '07:00';
-
-    private const EXIT_EARLIEST = '13:30';
-
     public function __construct(
         private readonly NfcReaderSlotService $slotService,
-        private readonly StudentPhotoPathService $photoPathService
+        private readonly StudentPhotoPathService $photoPathService,
+        private readonly AttendanceRulesService $rules
     ) {}
 
     public function processCardInserted(array $data): array
     {
+        // Attendance path never completes pairing; that happens only in the webhook controller.
         $payload = $this->slotService->enrichPayload($data, [
             'reader' => $data['reader'] ?? 'NFC Reader',
-            'timestamp' => now()->toIso8601String(),
-        ]);
+            'timestamp' => $this->rules->now()->toIso8601String(),
+        ], allowPairing: false);
+
+        if (empty($payload['reader_slot_id'])) {
+            return $payload + [
+                'event' => 'card_inserted',
+                'status' => 'warning',
+                'message' => 'Lector no emparejado. Asigna el PC/SC a un panel antes de registrar asistencia.',
+                'student' => null,
+                'attendance_skipped' => true,
+            ];
+        }
 
         if (array_key_exists('reader_armed', $payload) && $payload['reader_armed'] === false) {
             return $payload + [
@@ -36,6 +54,7 @@ class NfcAttendanceService
                 'status' => 'warning',
                 'message' => 'Lector en pausa. Active las lecturas para registrar asistencia.',
                 'student' => null,
+                'attendance_skipped' => true,
             ];
         }
 
@@ -50,15 +69,27 @@ class NfcAttendanceService
             ];
         }
 
-        $enrollment = Enrollment::with([
+        $today = $this->rules->now()->toDateString();
+
+        // Prefer the administratively active cycle for live NFC.
+        // getAcademicYearId() alone can map mid-year dates to the previous cycle.
+        $academicYearId = AcademicYear::query()->where('is_active', true)->value('id')
+            ?? AcademicYear::getAcademicYearId($today);
+
+        $enrollmentQuery = Enrollment::with([
             'student',
             'student.profile',
             'classGroup.gradeLevel',
             'academicYear:id',
         ])
-            ->where('status', 'active')
-            ->whereHas('student', fn ($q) => $q->where('credential_id', $credentialId))
-            ->first();
+            ->where('status', EnrollmentStatus::Active)
+            ->whereHas('student', fn ($q) => $q->where('credential_id', $credentialId));
+
+        if ($academicYearId) {
+            $enrollmentQuery->where('academic_year_id', $academicYearId);
+        }
+
+        $enrollment = $enrollmentQuery->first();
 
         if (! $enrollment) {
             return $payload + [
@@ -82,13 +113,15 @@ class NfcAttendanceService
             $studentData,
             $lockKey
         ): array {
+            // Soft debounce: still show identity for prefecture, skip another DB write
+            // if the same card is held against the reader for a few seconds.
             if (Cache::has("{$lockKey}:recent")) {
                 return $payload + [
                     'event' => 'card_inserted',
                     'credential_id' => $credentialId,
                     'status' => 'info',
                     'student' => $studentData,
-                    'message' => 'Lectura repetida ignorada.',
+                    'message' => 'Identificado.',
                 ];
             }
 
@@ -106,6 +139,13 @@ class NfcAttendanceService
         });
     }
 
+    /**
+     * Time-window mode (same readers all day):
+     * - No row today            → create entry
+     * - Entry, before exit time → identify only ("Entrada ya registrada")
+     * - Entry, at/after exit    → register exit once
+     * - Entry + exit done       → identify only ("Asistencia completa")
+     */
     private function processAttendance(
         Enrollment $enrollment,
         int $studentId,
@@ -113,8 +153,8 @@ class NfcAttendanceService
         array $payload,
         array $studentData
     ): array {
-        $today = now()->toDateString();
-        $currentTime = now();
+        $currentTime = $this->rules->now();
+        $today = $currentTime->toDateString();
 
         $todayAttendance = GeneralAttendance::query()
             ->where('student_id', $studentId)
@@ -122,90 +162,105 @@ class NfcAttendanceService
             ->first();
 
         if (! $todayAttendance) {
-            $status = $this->isLateEntry($currentTime) ? 'late' : 'present';
-            GeneralAttendance::create([
-                'student_id' => $studentId,
-                'academic_year_id' => $enrollment->academicYear->id,
-                'date' => $today,
-                'scanned_at' => $currentTime,
-                'entry_at' => $currentTime,
-                'status' => $status,
-                'source' => AttendanceSource::NFC,
-            ]);
+            $status = $this->rules->isLateEntry($currentTime)
+                ? GeneralAttendanceStatus::Late->value
+                : GeneralAttendanceStatus::Present->value;
 
-            $this->recordRecentReading($studentId, $credentialId, 'entry', $status === 'late' ? 'Entrada tardía registrada' : 'Entrada registrada.');
+            $message = $status === GeneralAttendanceStatus::Late->value
+                ? 'Entrada tardía registrada.'
+                : 'Entrada registrada.';
+
+            DB::transaction(function () use (
+                $enrollment,
+                $studentId,
+                $credentialId,
+                $currentTime,
+                $today,
+                $status,
+                $message
+            ): void {
+                GeneralAttendance::create([
+                    'student_id' => $studentId,
+                    'academic_year_id' => $enrollment->academicYear->id,
+                    'date' => $today,
+                    'scanned_at' => $currentTime,
+                    'entry_at' => $currentTime,
+                    'status' => $status,
+                    'source' => AttendanceSource::NFC,
+                ]);
+
+                $this->recordRecentReading($studentId, $credentialId, 'entry', $message);
+            });
+
             $this->dispatchGuardianNotifications($enrollment, $studentData, $currentTime, 'entry');
-
-            $message = $status === 'late' ? 'Entrada tardía registrada' : 'Tarjeta reconocida correctamente.';
 
             return $payload + [
                 'event' => 'card_inserted',
                 'credential_id' => $credentialId,
                 'status' => 'ok',
-                'student' => array_merge($studentData, ['type' => 'entry']),
+                'student' => array_merge($studentData, [
+                    'type' => 'entry',
+                    'attendance_status' => $status,
+                ]),
+                'message' => $message,
+            ];
+        }
+
+        if (! $todayAttendance->exit_at && $this->rules->canRegisterExit($currentTime)) {
+            $message = 'Salida registrada.';
+
+            DB::transaction(function () use (
+                $todayAttendance,
+                $currentTime,
+                $studentId,
+                $credentialId,
+                $message
+            ): void {
+                $todayAttendance->update(['exit_at' => $currentTime]);
+                $this->recordRecentReading($studentId, $credentialId, 'exit', $message);
+            });
+
+            $this->dispatchGuardianNotifications($enrollment, $studentData, $currentTime, 'exit');
+
+            return $payload + [
+                'event' => 'card_inserted',
+                'credential_id' => $credentialId,
+                'status' => 'ok',
+                'student' => array_merge($studentData, ['type' => 'exit']),
                 'message' => $message,
             ];
         }
 
         if (! $todayAttendance->exit_at) {
-            if ($this->canRegisterExit($currentTime)) {
-                $todayAttendance->update(['exit_at' => $currentTime]);
-
-                $this->recordRecentReading($studentId, $credentialId, 'exit', 'Salida registrada.');
-                $this->dispatchGuardianNotifications($enrollment, $studentData, $currentTime, 'exit');
-
-                return $payload + [
-                    'event' => 'card_inserted',
-                    'credential_id' => $credentialId,
-                    'status' => 'ok',
-                    'student' => array_merge($studentData, ['type' => 'exit']),
-                    'message' => 'Salida registrada.',
-                ];
-            }
-
-            $this->recordRecentReading($studentId, $credentialId, 'ignored', 'No es horario de salida.');
+            $message = 'Entrada ya registrada.';
+            $this->recordRecentReading($studentId, $credentialId, 'identify', $message);
 
             return $payload + [
                 'event' => 'card_inserted',
                 'credential_id' => $credentialId,
-                'status' => 'warning',
-                'student' => $studentData,
-                'message' => 'No es horario de salida. Intente después de las '.self::EXIT_EARLIEST,
+                'status' => 'info',
+                'student' => array_merge($studentData, ['type' => 'identify']),
+                'message' => $message,
             ];
         }
 
-        $this->recordRecentReading($studentId, $credentialId, 'duplicate', 'Ya tiene registro completo hoy.');
+        $message = 'Asistencia completa.';
+        $this->recordRecentReading($studentId, $credentialId, 'identify', $message);
 
         return $payload + [
             'event' => 'card_inserted',
             'credential_id' => $credentialId,
             'status' => 'info',
-            'student' => $studentData,
-            'message' => 'Ya tiene registro completo hoy.',
+            'student' => array_merge($studentData, ['type' => 'identify']),
+            'message' => $message,
         ];
-    }
-
-    private function isLateEntry(\DateTimeInterface $time): bool
-    {
-        $cutoff = \DateTime::createFromFormat('H:i', self::ENTRY_LATE_CUTOFF);
-        $compare = \DateTime::createFromFormat('H:i', $time->format('H:i'));
-
-        return $compare > $cutoff;
-    }
-
-    private function canRegisterExit(\DateTimeInterface $time): bool
-    {
-        $earliest = \DateTime::createFromFormat('H:i', self::EXIT_EARLIEST);
-        $compare = \DateTime::createFromFormat('H:i', $time->format('H:i'));
-
-        return $compare >= $earliest;
     }
 
     private function recordRecentReading(int $studentId, ?string $credentialId, string $event, string $message): void
     {
         RecentReading::create([
             'student_id' => $studentId,
-            'read_at' => now(),
+            'read_at' => $this->rules->now(),
             'event' => $event,
             'message' => $message,
             'credential_id' => $credentialId,
@@ -229,7 +284,7 @@ class NfcAttendanceService
             'gender' => $enrollment->student->profile?->gender,
             'grade' => $grade,
             'group' => $group,
-            'registered_at' => now()->toIso8601String(),
+            'registered_at' => $this->rules->now()->toIso8601String(),
         ];
     }
 

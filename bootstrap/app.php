@@ -1,10 +1,12 @@
 <?php
 
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Routing\Exceptions\InvalidSignatureException;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Exceptions\InvalidSignatureException;
+use Illuminate\Support\Facades\Log;
 use Spatie\Permission\Exceptions\UnauthorizedException;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -32,6 +34,12 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        /*Uncomment this to render JSON responses for API errors
+        $exceptions->shouldRenderJsonWhen(
+        fn (Request $request) => $request->is('api/*') || $request->expectsJson()
+        );
+         */
+
         $exceptions->render(function (
             InvalidSignatureException $e,
             Request $request
@@ -51,4 +59,30 @@ return Application::configure(basePath: dirname(__DIR__))
                 'error'   => 'FORBIDDEN',
             ], 403);
         });
+
+        /**
+         * Never leak SQL / schema details to API clients.
+         * ValidationException keeps Laravel's default 422 + errors bag.
+         * Uncomment this to render JSON responses for database errors**/
+        /*
+        $exceptions->render(function (QueryException $e, Request $request) {
+            if (! ($request->is('api/*') || $request->expectsJson())) {
+                return null;
+            }
+
+            Log::error('Database query failed', [
+                'sql' => $e->getSql(),
+                'bindings' => $e->getBindings(),
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'url' => $request->fullUrl(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al guardar los datos. Inténtalo de nuevo.',
+                'error' => 'DATABASE_ERROR',
+            ], 500);
+        });
+        */
     })->create();

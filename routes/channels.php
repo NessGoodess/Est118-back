@@ -14,13 +14,11 @@ Broadcast::channel('public-chat', function () {
 });
 
 // Private channel for credential reads (NFC reader events)
-// Only authenticated users can subscribe to this channel
 Broadcast::channel('credential-read-channel', function ($user) {
-    return $user !== null;
-    
-    //users with role 'admin' or 'nfc-reader'
-    //return $user->can('nfc-reader');
-    //return $user->role === 'admin';
+    return $user->can('manage nfc readings') ? [
+        'id' => $user->id,
+        'name' => $user->name,
+    ] : false;
 });
 
 // Canal de equipo para preinscripciones (base para chat futuro entre usuarios del módulo)

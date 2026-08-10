@@ -29,9 +29,9 @@ class NfcCredentialController extends Controller
         $eventType = $data['event'] ?? null;
 
         $payload = $this->slotService->enrichPayload($data, [
-            'reader' => $data['reader'] ?? 'NFC Reader',
+            'reader' => $data['reader'] ?? $data['reader_pcsc'] ?? null,
             'timestamp' => now()->toIso8601String(),
-        ], allowPairing: true);
+        ], allowPairing: $eventType === 'card_inserted');
 
         try {
             if ($eventType === 'card_inserted') {

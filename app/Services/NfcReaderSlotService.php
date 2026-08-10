@@ -12,23 +12,13 @@ class NfcReaderSlotService
 
     public const STATUS_CACHE_KEY = 'nfc_reader_status';
 
-    private function isSimulatedPcsc(?string $name): bool
-    {
-        return $name !== null && str_starts_with($name, 'SIM-READER-');
-    }
-
     /**
      * ACR readers expose PICC (NFC) and SAM (secure module); only PICC reads cards.
+     * ACR1252 names look like "... Dual Reader SAM] 01 00" (SAM before ']'), not always " SAM ".
      */
     private function isNfcCapableReader(string $name): bool
     {
-        $upper = strtoupper($name);
-
-        if (str_contains($upper, ' SAM ') || str_ends_with($upper, ' SAM 0')) {
-            return false;
-        }
-
-        return true;
+        return preg_match('/\bSAM\b/i', $name) !== 1;
     }
 
     /**
@@ -51,14 +41,6 @@ class NfcReaderSlotService
             ->values();
     }
 
-    /** Remove virtual reader names left from lab simulation. */
-    private function clearSimulatedBindings(): void
-    {
-        NfcReaderSlot::query()
-            ->where('pcsc_name', 'like', 'SIM-READER-%')
-            ->update(['pcsc_name' => null]);
-    }
-
     /**
      * Refresh last_seen_at for slots whose PC/SC is currently reported online.
      * Does not assign unbound readers (operators pair explicitly).
@@ -67,8 +49,6 @@ class NfcReaderSlotService
      */
     private function touchLastSeenForConnected(array $connectedReaders): void
     {
-        $this->clearSimulatedBindings();
-
         $pcscNames = $this->extractNfcPcscNames($connectedReaders);
         foreach ($pcscNames as $pcscName) {
             NfcReaderSlot::query()
@@ -85,7 +65,7 @@ class NfcReaderSlotService
     {
         $pcscName = $data['reader_pcsc'] ?? $data['reader'] ?? null;
 
-        if (! $pcscName || $this->isSimulatedPcsc($pcscName) || ! $this->isNfcCapableReader($pcscName)) {
+        if (! $pcscName || ! $this->isNfcCapableReader($pcscName)) {
             return null;
         }
 
@@ -116,7 +96,7 @@ class NfcReaderSlotService
             return $payload;
         }
 
-        if ($slot->pcsc_name !== null && ! $this->isSimulatedPcsc($slot->pcsc_name)) {
+        if ($slot->pcsc_name !== null) {
             $slot->update(['last_seen_at' => now()]);
         }
 
@@ -161,7 +141,6 @@ class NfcReaderSlotService
     {
         return $this->listActiveSlots()->map(function (NfcReaderSlot $slot) use ($pcscNames) {
             $connected = $slot->pcsc_name !== null
-                && ! $this->isSimulatedPcsc($slot->pcsc_name)
                 && $pcscNames->contains($slot->pcsc_name);
 
             return [
@@ -208,10 +187,9 @@ class NfcReaderSlotService
     public function listUnboundPcscNames(array $connectedPcsc): array
     {
         $bound = NfcReaderSlot::query()
-            ->where('is_active', true)
             ->whereNotNull('pcsc_name')
             ->pluck('pcsc_name')
-            ->filter(fn (?string $name) => $name && ! $this->isSimulatedPcsc($name))
+            ->filter()
             ->all();
 
         return array_values(array_diff($connectedPcsc, $bound));
@@ -223,7 +201,7 @@ class NfcReaderSlotService
     public function assignPcsc(NfcReaderSlot $slot, ?string $pcscName): NfcReaderSlot
     {
         if ($pcscName !== null && $pcscName !== '') {
-            if ($this->isSimulatedPcsc($pcscName) || ! $this->isNfcCapableReader($pcscName)) {
+            if (! $this->isNfcCapableReader($pcscName) || strcasecmp($pcscName, 'NFC Reader') === 0) {
                 throw new \InvalidArgumentException('Nombre PC/SC no válido para NFC.');
             }
 
@@ -290,7 +268,11 @@ class NfcReaderSlotService
      */
     public function tryCompletePairing(?string $pcscName): ?NfcReaderSlot
     {
-        if (! $pcscName || $this->isSimulatedPcsc($pcscName) || ! $this->isNfcCapableReader($pcscName)) {
+        if (
+            ! $pcscName
+            || ! $this->isNfcCapableReader($pcscName)
+            || strcasecmp($pcscName, 'NFC Reader') === 0
+        ) {
             return null;
         }
 
@@ -339,7 +321,7 @@ class NfcReaderSlotService
         $connectedPcsc = array_values(array_unique(array_filter($connectedPcsc)));
 
         return [
-            'slots' => $this->listActiveSlots(),
+            'slots' => $this->listAllSlots(),
             'status' => $status,
             'connected_pcsc' => $connectedPcsc,
             'unbound_pcsc' => $this->listUnboundPcscNames($connectedPcsc),

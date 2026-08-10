@@ -1,2 +1,81 @@
+<?php
 
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
+
+class PermissionSeeder extends Seeder
+{
+    /**
+     * Run the database seeds.
+     */
+    public function run(): void
+    {
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+
+        $permissions = [
+            // Users
+            'create users',
+            'edit users',
+            'delete users',
+            'view users',
+
+            // Students
+            'view students',
+            'create students',
+            'edit students',
+            'delete students',
+            'view student photos',
+            'manage student photos',
+
+            // Admissions
+            'view pre-enrollments',
+            'create pre-enrollments',
+            'edit pre-enrollments',
+            'delete pre-enrollments',
+            'manage admission cycles',
             'manage re-enrollment',
+
+            // General attendance (NFC)
+            'view general attendance',
+            'manage nfc readings',
+            'edit general attendance',
+
+            // Class attendance / reports (sidebar)
+            'view attendance',
+            'view reports',
+
+            // Announcements
+            'create announcements',
+            'view announcements',
+            'edit announcements',
+            'delete announcements',
+
+            // Misc used by UI
+            'manage settings',
+            'view groups',
+            'create profile',
+        ];
+
+        foreach ($permissions as $permission) {
+            Permission::findOrCreate($permission, 'web');
+        }
+
+        // Legacy name from older seeds — keep API on manage nfc readings
+        $legacy = Permission::where('name', 'manage general attendance')->first();
+        if ($legacy) {
+            $legacy->delete();
+        }
+
+        Role::findOrCreate('admin', 'web');
+        Role::findOrCreate('user', 'web');
+        Role::findOrCreate('pre-enrollment-admin', 'web');
+
+        $this->command->info('Permissions and roles created successfully');
+        $this->command->warn('Assign permissions with: php artisan permissions:admin');
+    }
+}
+

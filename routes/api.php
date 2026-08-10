@@ -10,6 +10,7 @@ use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TelegramController;
 use App\Http\Controllers\Auth\ChangePasswordController;
 use App\Http\Controllers\GeneralAttendanceController;
+use App\Http\Controllers\AttendanceSettingsController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\EnrollmentPromotionController;
@@ -80,11 +81,12 @@ Route::prefix('reader')->group(function () {
             'service.token:' . ServiceAbility::NFC_READER->value,
         ]);
 
-    // Reader status (Synchronization)
-    Route::get('/status', [NfcCredentialController::class, 'readerStatus'])
-        ->middleware(['auth:sanctum', 'verified']);
-
-    Route::middleware(['auth:sanctum', 'verified'])->group(function () {
+    Route::middleware([
+        'auth:sanctum',
+        'verified',
+        'permission:manage nfc readings',
+    ])->group(function () {
+        Route::get('/status', [NfcCredentialController::class, 'readerStatus']);
         Route::get('/slots', [NfcReaderSlotController::class, 'index']);
         Route::get('/config', [NfcReaderSlotController::class, 'config']);
         Route::patch('/slots/{slot}', [NfcReaderSlotController::class, 'update']);
@@ -96,15 +98,27 @@ Route::prefix('reader')->group(function () {
 });
 
 /**
- * Attendance
+ * Attendance (school-wide / NFC)
  * ___________________________________________________________________________
  */
 Route::prefix('attendance')->middleware(['auth:sanctum', 'verified'])->group(function () {
-    Route::get('/daily', [GeneralAttendanceController::class, 'daily']);
-    Route::get('/daily-statuses', [GeneralAttendanceController::class, 'dailyStatuses']);
-    Route::get('/last-attendance', [GeneralAttendanceController::class, 'getLastAttendance']);
-    Route::get('/all-attendances', [GeneralAttendanceController::class, 'index']);
-    Route::get('/recent-readings', [GeneralAttendanceController::class, 'recentReadings']);
+    Route::middleware('permission:view general attendance')->group(function () {
+        Route::get('/daily', [GeneralAttendanceController::class, 'daily']);
+        Route::get('/daily-statuses', [GeneralAttendanceController::class, 'dailyStatuses']);
+        Route::get('/all-attendances', [GeneralAttendanceController::class, 'index']);
+        Route::get('/settings', [AttendanceSettingsController::class, 'show']);
+    });
+
+    Route::put('/settings', [AttendanceSettingsController::class, 'update'])
+        ->middleware('permission:edit general attendance');
+
+    // Used by live panels (fallback) and viewers
+    Route::get('/last-attendance', [GeneralAttendanceController::class, 'getLastAttendance'])
+        ->middleware('permission:view general attendance|manage nfc readings');
+
+    // Live panels feed
+    Route::get('/recent-readings', [GeneralAttendanceController::class, 'recentReadings'])
+        ->middleware('permission:manage nfc readings');
 });
 
 
@@ -266,8 +280,8 @@ Route::middleware('auth:sanctum', 'verified')->group(function () {
  */
 Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(function () {
 
-    Route::get('/grades', [GradeLevelController::class, 'index']);
-    //->middleware('permission:view students');
+  Route::get('/grades', [GradeLevelController::class, 'index'])
+        ->middleware('permission:view students');
 
     Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
 
@@ -305,10 +319,10 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
         ->middleware('permission:edit students');
 
     Route::get('/{student}/photo-status', [StudentController::class, 'photoStatus'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view student photos|manage student photos');
 
     Route::post('/{student}/photo', [StudentController::class, 'uploadPhoto'])
-        ->middleware('permission:edit students');
+        ->middleware('permission:manage student photos');
 });
 
 

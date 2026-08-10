@@ -4,6 +4,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Defaults (fallback)
+    |--------------------------------------------------------------------------
+    |
+    | Runtime values live in attendance_settings (editable via web).
+    | This file is used when seeding that row or if the table is empty.
+    |
+    */
+
+    /*
+    |--------------------------------------------------------------------------
     | Zona horaria oficial de asistencia general
     |--------------------------------------------------------------------------
     */

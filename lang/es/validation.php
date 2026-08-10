@@ -233,6 +233,32 @@ return [
         // Voucher
         'tuitionVoucher.hasSchoolVoucher' => 'cuenta con voucher escolar',
         'tuitionVoucher.schoolVoucherFolio' => 'folio del voucher escolar',
+
+        // Actualización de alumno (PATCH students)
+        'profile.first_name' => 'nombre',
+        'profile.last_name' => 'apellido',
+        'profile.national_id' => 'CURP',
+        'profile.birth_date' => 'fecha de nacimiento',
+        'profile.gender' => 'sexo',
+        'profile.phone_number' => 'teléfono principal',
+        'profile.phone_second_number' => 'teléfono secundario',
+        'profile.email' => 'correo electrónico',
+        'address.street_type' => 'tipo de calle',
+        'address.street_name' => 'nombre de la calle',
+        'address.house_number' => 'número exterior',
+        'address.apartament_number' => 'número interior',
+        'address.neighborhood_type' => 'tipo de colonia',
+        'address.neighborhood_name' => 'nombre de la colonia',
+        'address.postal_code' => 'código postal',
+        'address.city' => 'ciudad',
+        'address.state' => 'estado',
+
+        // Horarios asistencia general (PUT attendance/settings)
+        'timezone' => 'zona horaria',
+        'entry_time' => 'hora de entrada',
+        'tolerance_minutes' => 'tolerancia en minutos',
+        'exit_earliest' => 'salida más temprana',
+        'entry_window_closes_at' => 'cierre de ventana de entrada',
     ],
 
 ];

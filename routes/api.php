@@ -186,18 +186,20 @@ Route::prefix('admissions')->group(function () {
 Route::prefix('academic-years')
     ->middleware(['auth:sanctum', 'verified'])
     ->group(function () {
+ 
         Route::get('/', [AcademicYearController::class, 'index'])
-            ->middleware('permission:manage re-enrollment|manage admission cycles');
+            ->middleware('permission:view academic years|manage re-enrollment|manage admission cycles');
         Route::post('/', [AcademicYearController::class, 'store'])
-            ->middleware('permission:manage re-enrollment');
+            ->middleware('permission:create academic years');
+        // Edit disabled for now — closed in controller.
         Route::patch('/{academicYear}', [AcademicYearController::class, 'update'])
-            ->middleware('permission:manage re-enrollment');
+            ->middleware('permission:create academic years');
         Route::patch('/{academicYear}/activate', [AcademicYearController::class, 'activate'])
-            ->middleware('permission:manage re-enrollment');
+            ->middleware('permission:create academic years');
         Route::post('/{academicYear}/generate-groups', [AcademicYearController::class, 'generateGroups'])
-            ->middleware('permission:manage re-enrollment');
+            ->middleware('permission:create academic years');
         Route::delete('/{academicYear}', [AcademicYearController::class, 'destroy'])
-            ->middleware('permission:manage re-enrollment');
+            ->middleware('permission:delete academic years');
         Route::post('/promote', [AcademicYearPromotionController::class, 'promote'])
             ->middleware('permission:manage admission cycles|manage re-enrollment');
     });

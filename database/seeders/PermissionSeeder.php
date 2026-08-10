@@ -39,6 +39,11 @@ class PermissionSeeder extends Seeder
             'manage admission cycles',
             'manage re-enrollment',
 
+            // Academic years (school calendar cycles)
+            'view academic years',
+            'create academic years',
+            'delete academic years',
+
             // General attendance (NFC)
             'view general attendance',
             'manage nfc readings',
@@ -70,12 +75,14 @@ class PermissionSeeder extends Seeder
             $legacy->delete();
         }
 
-        Role::findOrCreate('admin', 'web');
+        $adminRole = Role::findOrCreate('admin', 'web');
         Role::findOrCreate('user', 'web');
         Role::findOrCreate('pre-enrollment-admin', 'web');
 
+        $adminRole->syncPermissions(Permission::all());
+
         $this->command->info('Permissions and roles created successfully');
-        $this->command->warn('Assign permissions with: php artisan permissions:admin');
+        $this->command->info('Admin role synced with all permissions.');
+        $this->command->warn('Re-run or adjust other roles with: php artisan permissions:admin');
     }
 }
-

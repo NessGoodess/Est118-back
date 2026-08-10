@@ -5,6 +5,7 @@ namespace App\Services\School;
 use App\Models\AcademicYear;
 use App\Models\ClassGroup;
 use App\Models\GradeLevel;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class AcademicYearService
@@ -15,12 +16,19 @@ class AcademicYearService
     public function create(array $data): AcademicYear
     {
         return DB::transaction(function () use ($data) {
+            $startsOn = Carbon::parse($data['starts_on'])->toDateString();
+            $endsOn = Carbon::parse($data['ends_on'])->toDateString();
+
+            $yearStart = (string) ($data['year_start'] ?? Carbon::parse($startsOn)->year);
+            $yearEnd = (string) ($data['year_end'] ?? Carbon::parse($endsOn)->year);
             $description = $data['description']
-                ?? "Año escolar {$data['year_start']}-{$data['year_end']}";
+                ?? "Año escolar {$yearStart}-{$yearEnd}";
 
             $year = AcademicYear::create([
-                'year_start' => $data['year_start'],
-                'year_end' => $data['year_end'],
+                'year_start' => $yearStart,
+                'year_end' => $yearEnd,
+                'starts_on' => $startsOn,
+                'ends_on' => $endsOn,
                 'description' => $description,
                 'is_active' => false,
             ]);
@@ -31,6 +39,22 @@ class AcademicYearService
 
             return $year->fresh();
         });
+    }
+
+    public function update(AcademicYear $year, array $data): AcademicYear
+    {
+        $payload = $data;
+
+        if (isset($payload['starts_on'])) {
+            $payload['starts_on'] = Carbon::parse($payload['starts_on'])->toDateString();
+        }
+        if (isset($payload['ends_on'])) {
+            $payload['ends_on'] = Carbon::parse($payload['ends_on'])->toDateString();
+        }
+
+        $year->update($payload);
+
+        return $year->fresh();
     }
 
     public function generateClassGroups(AcademicYear $year): int

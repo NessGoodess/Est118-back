@@ -15,9 +15,20 @@ class AcademicYear extends Model
     protected $fillable = [
         'year_start',
         'year_end',
+        'starts_on',
+        'ends_on',
         'description',
         'is_active',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'starts_on' => 'date',
+            'ends_on' => 'date',
+            'is_active' => 'boolean',
+        ];
+    }
 
     /**
      * Get all of the classGroup for the AcademicYear
@@ -32,22 +43,48 @@ class AcademicYear extends Model
         return $this->hasMany(Enrollment::class);
     }
 
+    public static function rangesOverlap(
+        string $startsOn,
+        string $endsOn,
+        ?int $ignoreId = null
+    ): bool {
+        return static::query()
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->whereDate('starts_on', '<=', $endsOn)
+            ->whereDate('ends_on', '>=', $startsOn)
+            ->exists();
+    }
+
     public static function getAcademicYearId($date)
     {
-        $date = Carbon::parse($date);
-        $year = $date->year;
-        $month = $date->month;
+        $day = Carbon::parse($date)->toDateString();
 
-        if ($month >= 8) {
-            $year_start = $year;
-            $year_end = $year + 1;
-        } else {
-            $year_start = $year - 1;
-            $year_end = $year;
+        $id = static::query()
+            ->whereDate('starts_on', '<=', $day)
+            ->whereDate('ends_on', '>=', $day)
+            ->orderByDesc('starts_on')
+            ->value('id');
+
+        if ($id !== null) {
+            return $id;
         }
 
-        return AcademicYear::where('year_start', $year_start)
-            ->where('year_end', $year_end)
+        // Fallback for legacy rows without dates (should not happen after migrate).
+        $parsed = Carbon::parse($date);
+        $year = $parsed->year;
+        $month = $parsed->month;
+
+        if ($month >= 8) {
+            $yearStart = $year;
+            $yearEnd = $year + 1;
+        } else {
+            $yearStart = $year - 1;
+            $yearEnd = $year;
+        }
+
+        return static::query()
+            ->where('year_start', $yearStart)
+            ->where('year_end', $yearEnd)
             ->value('id');
     }
 }

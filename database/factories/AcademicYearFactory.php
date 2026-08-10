@@ -9,15 +9,17 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class AcademicYearFactory extends Factory
 {
-    /**
-     * Define the model's default state.
-     *
-     * @return array<string, mixed>
-     */
     public function definition(): array
     {
+        $startYear = fake()->numberBetween(2024, 2030);
+
         return [
-            //
+            'year_start' => (string) $startYear,
+            'year_end' => (string) ($startYear + 1),
+            'starts_on' => sprintf('%d-08-01', $startYear),
+            'ends_on' => sprintf('%d-07-31', $startYear + 1),
+            'description' => sprintf('Año escolar %d-%d', $startYear, $startYear + 1),
+            'is_active' => false,
         ];
     }
 }

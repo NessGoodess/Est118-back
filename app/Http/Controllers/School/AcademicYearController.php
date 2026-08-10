@@ -4,31 +4,23 @@ namespace App\Http\Controllers\School;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\School\StoreAcademicYearRequest;
-use App\Http\Requests\School\UpdateAcademicYearRequest;
 use App\Models\AcademicYear;
 use App\Models\Enrollment;
 use App\Services\School\AcademicYearService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Routing\Controllers\HasMiddleware;
-use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Http\Request;
 
-class AcademicYearController extends Controller implements HasMiddleware
+class AcademicYearController extends Controller
 {
     public function __construct(
         private readonly AcademicYearService $academicYearService
     ) {}
 
-    public static function middleware(): array
-    {
-        return [
-            new Middleware('permission:manage re-enrollment'),
-        ];
-    }
-
     public function index(): JsonResponse
     {
         $years = AcademicYear::query()
             ->withCount(['classGroup as class_groups_count'])
+            ->orderByDesc('starts_on')
             ->orderByDesc('year_start')
             ->get();
 
@@ -46,11 +38,14 @@ class AcademicYearController extends Controller implements HasMiddleware
         ], 201);
     }
 
-    public function update(UpdateAcademicYearRequest $request, AcademicYear $academicYear): JsonResponse
+    public function update(Request $request, AcademicYear $academicYear): JsonResponse
     {
-        $academicYear->update($request->validated());
+        unset($request, $academicYear);
 
-        return response()->json(['success' => true, 'data' => $academicYear->fresh()]);
+        return response()->json([
+            'success' => false,
+            'message' => 'La edición de ciclos escolares no está habilitada.',
+        ], 403);
     }
 
     public function activate(AcademicYear $academicYear): JsonResponse

@@ -5,10 +5,19 @@ namespace App\Http\Controllers\Admission;
 use App\Exports\PreEnrollmentExport;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Controllers\HasMiddleware;
+use Illuminate\Routing\Controllers\Middleware;
 use Maatwebsite\Excel\Facades\Excel;
 
-class PreEnrollmentExportController extends Controller
+class PreEnrollmentExportController extends Controller implements HasMiddleware
 {
+    public static function middleware(): array
+    {
+        return [
+            new Middleware('permission:view pre-enrollments'),
+        ];
+    }
+
     public function export()
     {
         return Excel::download(new PreEnrollmentExport, 'preinscripciones_' . date('Y-m-d') . '.xlsx');

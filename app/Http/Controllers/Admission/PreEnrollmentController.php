@@ -2,36 +2,50 @@
 
 namespace App\Http\Controllers\Admission;
 
-use App\Http\Controllers\Controller;
 use App\Enums\AdmissionCycleStatus;
-use App\Http\Requests\StorePreEnrollmentRequest;
-use App\Http\Requests\UpdatePreEnrollmentRequest;
+use App\Exceptions\AdmissionConversionException;
+use App\Http\Controllers\Controller;
 use App\Http\Requests\ConvertPreEnrollmentToStudentRequest;
+use App\Http\Requests\InitialReviewPreEnrollmentRequest;
+use App\Http\Requests\StorePreEnrollmentRequest;
 use App\Http\Requests\UpdatePreEnrollmentProcessRequest;
+use App\Http\Requests\UpdatePreEnrollmentRequest;
+use App\Http\Resources\PreEnrollmentDetailResource;
 use App\Http\Resources\PreEnrollmentListResource;
 use App\Models\Admission\AdmissionCycle;
 use App\Models\PreEnrollment;
+use App\Services\AdmissionIdempotencyService;
 use App\Services\ConvertPreEnrollmentToStudentService;
+use App\Services\PreEnrollmentProcessService;
 use App\Services\PreEnrollmentService;
-use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Routing\Controllers\HasMiddleware;
+use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class PreEnrollmentController extends Controller implements HasMiddleware
 {
     public function __construct(
         private PreEnrollmentService $preEnrollmentService,
-        private ConvertPreEnrollmentToStudentService $convertPreEnrollmentService
+        private ConvertPreEnrollmentToStudentService $convertPreEnrollmentService,
+        private AdmissionIdempotencyService $idempotencyService,
+        private PreEnrollmentProcessService $processService,
     ) {}
 
     public static function middleware(): array
     {
         return [
             new Middleware('permission:view pre-enrollments')->only(['index', 'show']),
-            new Middleware('permission:edit pre-enrollments')->only(['update', 'updateProcess', 'convertToStudent']),
             new Middleware('permission:create pre-enrollments')->only(['storeByAdmin']),
+            new Middleware('permission:edit pre-enrollments')->only(['update', 'resentPdfFolio']),
+            new Middleware('permission:delete pre-enrollments')->only(['destroy']),
+            new Middleware('permission:edit admission enrollment')->only([
+                'updateProcess',
+                'initialReview',
+                'convertToStudent',
+            ]),
         ];
     }
 
@@ -45,7 +59,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         // Si se envía cycle_id, úsalo, si no busca el ciclo activo
         if ($cycleId) {
             $cycle = AdmissionCycle::find($cycleId);
-            if (!$cycle) {
+            if (! $cycle) {
                 return response()->json([
                     'status' => 'Not Found',
                     'message' => 'Ciclo no encontrado',
@@ -55,10 +69,10 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         } else {
             $activeCycle = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)->first();
 
-            if (!$activeCycle) {
+            if (! $activeCycle) {
 
                 $latestCycle = AdmissionCycle::latest()->first();
-                if (!$latestCycle) {
+                if (! $latestCycle) {
                     return response()->json([
                         'status' => 'Not Found',
                         'message' => __('admissions.no_active_cycle'),
@@ -81,24 +95,30 @@ class PreEnrollmentController extends Controller implements HasMiddleware
      */
     public function store(StorePreEnrollmentRequest $request)
     {
-        try {
-            $result = $this->preEnrollmentService->createPreEnrollment($request->validated());
+        return $this->idempotencyService->run(
+            $request,
+            AdmissionIdempotencyService::SCOPE_PUBLIC_STORE,
+            function () use ($request) {
+                try {
+                    $result = $this->preEnrollmentService->createPreEnrollment($request->validated());
 
-            return response()->json([
-                'folio' => $result['folio'],
-                'downloadUrl' => $result['downloadUrl'],
-                'message' => __('admissions.created_success'),
-            ], 201);
-        } catch (\Exception $e) {
-            Log::error('Error al crear preinscripción', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+                    return response()->json([
+                        'folio' => $result['folio'],
+                        'downloadUrl' => $result['downloadUrl'],
+                        'message' => __('admissions.created_success'),
+                    ], 201);
+                } catch (\Exception $e) {
+                    Log::error('Error al crear preinscripción', [
+                        'message' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
 
-            return response()->json([
-                'message' => __('admissions.error_processing'),
-            ], 500);
-        }
+                    return response()->json([
+                        'message' => __('admissions.error_processing'),
+                    ], 500);
+                }
+            }
+        );
     }
 
     /**
@@ -106,7 +126,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
      */
     public function show(PreEnrollment $preEnrollment)
     {
-        return $preEnrollment;
+        return new PreEnrollmentDetailResource($preEnrollment);
     }
 
     /**
@@ -114,29 +134,35 @@ class PreEnrollmentController extends Controller implements HasMiddleware
      */
     public function storeByAdmin(StorePreEnrollmentRequest $request)
     {
-        try {
-            $cycleId = $request->input('admission_cycle_id') ? (int) $request->input('admission_cycle_id') : null;
-            $result = $this->preEnrollmentService->createPreEnrollment(
-                $request->validated(),
-                $cycleId,
-                $request->user()
-            );
+        return $this->idempotencyService->run(
+            $request,
+            AdmissionIdempotencyService::SCOPE_ADMIN_STORE,
+            function () use ($request) {
+                try {
+                    $cycleId = $request->input('admission_cycle_id') ? (int) $request->input('admission_cycle_id') : null;
+                    $result = $this->preEnrollmentService->createPreEnrollment(
+                        $request->validated(),
+                        $cycleId,
+                        $request->user()
+                    );
 
-            return response()->json([
-                'folio' => $result['folio'],
-                'downloadUrl' => $result['downloadUrl'],
-                'message' => __('admissions.created_success'),
-            ], 201);
-        } catch (\Exception $e) {
-            Log::error('Error al crear preinscripción via Admin', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+                    return response()->json([
+                        'folio' => $result['folio'],
+                        'downloadUrl' => $result['downloadUrl'],
+                        'message' => __('admissions.created_success'),
+                    ], 201);
+                } catch (\Exception $e) {
+                    Log::error('Error al crear preinscripción via Admin', [
+                        'message' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
 
-            return response()->json([
-                'message' => __('admissions.error_processing'),
-            ], 500);
-        }
+                    return response()->json([
+                        'message' => __('admissions.error_processing'),
+                    ], 500);
+                }
+            }
+        );
     }
 
     /**
@@ -144,9 +170,39 @@ class PreEnrollmentController extends Controller implements HasMiddleware
      */
     public function update(UpdatePreEnrollmentRequest $request, PreEnrollment $preEnrollment)
     {
+        if ($preEnrollment->converted_student_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Esta solicitud ya fue inscrita y no se puede modificar.',
+            ], 422);
+        }
+
         $preEnrollment->update($request->validated());
 
-        return response()->json($preEnrollment->fresh());
+        return new PreEnrollmentDetailResource($preEnrollment->fresh());
+    }
+
+    /**
+     * Start review: pending → in_review (audited).
+     */
+    public function initialReview(
+        InitialReviewPreEnrollmentRequest $request,
+        PreEnrollment $preEnrollment
+    ) {
+        try {
+            $updated = $this->processService->startInitialReview($preEnrollment, [
+                'expected_updated_at' => $request->input('expected_updated_at'),
+                'notes' => $request->input('notes'),
+                'documents_status' => $request->input('documents_status'),
+                'payment_status' => $request->input('payment_status'),
+                'admission_exam_score' => $request->input('admission_exam_score'),
+                'reviewed_by' => $request->user()?->id,
+            ]);
+
+            return new PreEnrollmentDetailResource($updated);
+        } catch (ValidationException $exception) {
+            throw $exception;
+        }
     }
 
     /**
@@ -154,8 +210,17 @@ class PreEnrollmentController extends Controller implements HasMiddleware
      */
     public function updateProcess(UpdatePreEnrollmentProcessRequest $request, PreEnrollment $preEnrollment)
     {
-        $preEnrollment->update($request->validated());
-        return response()->json($preEnrollment->fresh());
+        try {
+            $updated = $this->processService->updateProcess(
+                $preEnrollment,
+                $request->validated(),
+                $request->user()?->id,
+            );
+
+            return new PreEnrollmentDetailResource($updated);
+        } catch (ValidationException $exception) {
+            throw $exception;
+        }
     }
 
     /**
@@ -165,27 +230,68 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         ConvertPreEnrollmentToStudentRequest $request,
         PreEnrollment $preEnrollment
     ) {
-        try {
-            $payload = $this->convertPreEnrollmentService->convert(
-                $preEnrollment,
-                $request->filled('academic_year_id') ? $request->integer('academic_year_id') : null,
-                $request->filled('class_group_id') ? $request->integer('class_group_id') : null,
-            );
+        return $this->idempotencyService->run(
+            $request,
+            AdmissionIdempotencyService::SCOPE_CONVERT,
+            function () use ($request, $preEnrollment) {
+                try {
+                    $payload = $this->convertPreEnrollmentService->convert(
+                        $preEnrollment,
+                        [
+                            'academic_year_id' => $request->filled('academic_year_id') ? $request->integer('academic_year_id') : null,
+                            'class_group_id' => $request->filled('class_group_id') ? $request->integer('class_group_id') : null,
+                            'channel' => $request->input('channel', 'campaign'),
+                            'force_incomplete_docs' => $request->boolean('force_incomplete_docs'),
+                            'force_incomplete_data' => $request->boolean('force_incomplete_data'),
+                            'force_without_payment' => $request->boolean('force_without_payment'),
+                            'converted_by' => $request->user()?->id,
+                        ],
+                    );
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Estudiante inscrito correctamente.',
-                'data' => [
-                    'student_id' => $payload['student']->id,
-                    'enrollment_id' => $payload['enrollment']->id,
-                ],
-            ]);
-        } catch (\RuntimeException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage(),
-            ], 422);
-        }
+                    return response()->json([
+                        'success' => true,
+                        'message' => $payload['replayed']
+                            ? __('admissions.to_student.replayed_success')
+                            : __('admissions.to_student.converted_success'),
+                        'replayed' => $payload['replayed'],
+                        'data' => [
+                            'student_id' => $payload['student']->id,
+                            'enrollment_id' => $payload['enrollment']->id,
+                            'replayed' => $payload['replayed'],
+                            'exception_flags' => $payload['exception_flags'],
+                            'admission_channel' => $payload['enrollment']->admission_channel,
+                            'placement_status' => $payload['enrollment']->placement_status,
+                        ],
+                    ]);
+                } catch (AdmissionConversionException $exception) {
+                    if ($exception->httpStatus >= 500) {
+                        Log::error('Admission conversion failed', [
+                            'pre_enrollment_id' => $preEnrollment->id,
+                            'error_code' => $exception->errorCode,
+                            'message' => $exception->getPrevious()?->getMessage()
+                                ?? $exception->getMessage(),
+                        ]);
+                    }
+
+                    return response()->json([
+                        'success' => false,
+                        'error_code' => $exception->errorCode,
+                        'message' => $exception->getMessage(),
+                    ], $exception->httpStatus);
+                } catch (Throwable $exception) {
+                    Log::error('Unexpected admission conversion error', [
+                        'pre_enrollment_id' => $preEnrollment->id,
+                        'message' => $exception->getMessage(),
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'error_code' => 'conversion_failed',
+                        'message' => __('admissions.to_student.conversion_failed'),
+                    ], 500);
+                }
+            }
+        );
     }
 
     /**
@@ -231,6 +337,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
                 'message' => $th->getMessage(),
                 'trace' => $th->getTraceAsString(),
             ]);
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'Error al reenviar PDF',

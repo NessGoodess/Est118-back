@@ -6,7 +6,9 @@ use App\Models\AcademicYear;
 use App\Models\ClassGroup;
 use App\Models\GradeLevel;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 class AcademicYearService
 {
@@ -89,14 +91,36 @@ class AcademicYearService
 
     public function activate(AcademicYear $year): AcademicYear
     {
-        return DB::transaction(function () use ($year) {
-            AcademicYear::query()
-                ->where('id', '!=', $year->id)
-                ->update(['is_active' => false]);
+        try {
+            return DB::transaction(function () use ($year) {
+                // Lock all years so concurrent activates serialize.
+                AcademicYear::query()->orderBy('id')->lockForUpdate()->get(['id']);
 
-            $year->update(['is_active' => true]);
+                AcademicYear::query()
+                    ->where('id', '!=', $year->id)
+                    ->update(['is_active' => false]);
 
-            return $year->fresh();
-        });
+                $year->refresh();
+                $year->update(['is_active' => true]);
+
+                return $year->fresh();
+            });
+        } catch (QueryException $exception) {
+            if ($this->isActiveFlagConflict($exception)) {
+                throw new RuntimeException('Ya existe un ciclo escolar activo.');
+            }
+
+            throw $exception;
+        }
+    }
+
+    private function isActiveFlagConflict(QueryException $exception): bool
+    {
+        $driverCode = (int) ($exception->errorInfo[1] ?? 0);
+        $message = strtolower($exception->getMessage());
+
+        return $exception->getCode() === '23000'
+            && in_array($driverCode, [19, 1062], true)
+            && str_contains($message, 'active_flag');
     }
 }

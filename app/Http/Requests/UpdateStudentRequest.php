@@ -32,6 +32,7 @@ class UpdateStudentRequest extends FormRequest
             'address.street_type' => ['sometimes', 'nullable', 'string', 'max:50'],
             'address.street_name' => ['sometimes', 'nullable', 'string', 'max:150'],
             'address.house_number' => ['sometimes', 'nullable', 'string', 'max:30'],
+            'address.unit_number' => ['sometimes', 'nullable', 'string', 'max:30'],
             'address.apartament_number' => ['sometimes', 'nullable', 'string', 'max:30'],
             'address.neighborhood_type' => ['sometimes', 'nullable', 'string', 'max:50'],
             'address.neighborhood_name' => ['sometimes', 'nullable', 'string', 'max:150'],

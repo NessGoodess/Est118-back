@@ -21,6 +21,10 @@ class Enrollment extends Model
         'is_new_admission',
         'is_approved',
         'promotion_result',
+        'admission_channel',
+        'placement_status',
+        'convert_exception_flags',
+        'placed_at',
     ];
 
     protected $casts = [
@@ -29,6 +33,8 @@ class Enrollment extends Model
         'is_new_admission' => 'boolean',
         'is_approved' => 'boolean',
         'promotion_result' => PromotionResult::class,
+        'convert_exception_flags' => 'array',
+        'placed_at' => 'datetime',
     ];
 
     /**

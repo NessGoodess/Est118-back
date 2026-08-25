@@ -6,8 +6,9 @@ use App\Enums\AdmissionCycleStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admission\StoreAdmissionCycleRequest;
 use App\Models\Admission\AdmissionCycle;
-use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Database\QueryException;
 use Illuminate\Routing\Controllers\HasMiddleware;
+use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -19,9 +20,10 @@ class AdmissionCycleController extends Controller implements HasMiddleware
     public static function middleware(): array
     {
         return [
-            // Protect all routes except public status endpoint
-            new Middleware('permission:manage admission cycles')
-                ->except(['status']),
+            new Middleware('permission:view pre-enrollments')->only(['index']),
+            new Middleware('permission:create pre-enrollments')->only(['store', 'activate']),
+            new Middleware('permission:edit pre-enrollments')->only(['close', 'reopen']),
+            new Middleware('permission:delete pre-enrollments')->only(['destroy']),
         ];
     }
 
@@ -75,25 +77,37 @@ class AdmissionCycleController extends Controller implements HasMiddleware
             ], 422);
         }
 
-        DB::transaction(function () use ($cycle) {
+        try {
+            DB::transaction(function () use ($cycle) {
+                // Serialize concurrent activates even when no ACTIVE row exists yet.
+                AdmissionCycle::query()->whereKey($cycle->id)->lockForUpdate()->firstOrFail();
 
-            $activeExists = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)
-                ->lockForUpdate()
-                ->exists();
+                $activeExists = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)
+                    ->lockForUpdate()
+                    ->exists();
 
-            if ($activeExists) {
+                if ($activeExists) {
+                    throw ValidationException::withMessages([
+                        'status' => __('admissions.exist'),
+                    ]);
+                }
+
+                // Synchronize folio counter to prevent duplicates before activating
+                $cycle->synchronizeFolioCounter();
+
+                $cycle->update([
+                    'status' => AdmissionCycleStatus::ACTIVE,
+                ]);
+            });
+        } catch (QueryException $exception) {
+            if ($this->isActiveFlagConflict($exception)) {
                 throw ValidationException::withMessages([
                     'status' => __('admissions.exist'),
                 ]);
             }
 
-            // Synchronize folio counter to prevent duplicates before activating
-            $cycle->synchronizeFolioCounter();
-
-            $cycle->update([
-                'status' => AdmissionCycleStatus::ACTIVE,
-            ]);
-        });
+            throw $exception;
+        }
 
         return response()->json([
             'message' => __('admissions.active_success'),
@@ -132,32 +146,43 @@ class AdmissionCycleController extends Controller implements HasMiddleware
             ], 422);
         }
 
-        DB::transaction(function () use ($cycle, $request) {
+        try {
+            DB::transaction(function () use ($cycle, $request) {
+                AdmissionCycle::query()->whereKey($cycle->id)->lockForUpdate()->firstOrFail();
 
-            $activeExists = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)
-                ->lockForUpdate()
-                ->exists();
+                $activeExists = AdmissionCycle::where('status', AdmissionCycleStatus::ACTIVE)
+                    ->lockForUpdate()
+                    ->exists();
 
-            if ($activeExists) {
+                if ($activeExists) {
+                    throw ValidationException::withMessages([
+                        'status' => __('admissions.exist'),
+                    ]);
+                }
+
+                // Synchronize folio counter to prevent duplicates before reopening
+                $cycle->synchronizeFolioCounter();
+
+                $updateData = [
+                    'status' => AdmissionCycleStatus::ACTIVE,
+                ];
+
+                // If a new end date is provided, update it
+                if ($request->has('end_at')) {
+                    $updateData['end_at'] = $request->input('end_at');
+                }
+
+                $cycle->update($updateData);
+            });
+        } catch (QueryException $exception) {
+            if ($this->isActiveFlagConflict($exception)) {
                 throw ValidationException::withMessages([
                     'status' => __('admissions.exist'),
                 ]);
             }
 
-            // Synchronize folio counter to prevent duplicates before reopening
-            $cycle->synchronizeFolioCounter();
-
-            $updateData = [
-                'status' => AdmissionCycleStatus::ACTIVE,
-            ];
-
-            // If a new end date is provided, update it
-            if ($request->has('end_at')) {
-                $updateData['end_at'] = $request->input('end_at');
-            }
-
-            $cycle->update($updateData);
-        });
+            throw $exception;
+        }
 
         return response()->json([
             'message' => __('admissions.reopened_success'),
@@ -217,5 +242,15 @@ class AdmissionCycleController extends Controller implements HasMiddleware
                 default => null,
             },
         ]);
+    }
+
+    private function isActiveFlagConflict(QueryException $exception): bool
+    {
+        $driverCode = (int) ($exception->errorInfo[1] ?? 0);
+        $message = strtolower($exception->getMessage());
+
+        return $exception->getCode() === '23000'
+            && in_array($driverCode, [19, 1062], true)
+            && str_contains($message, 'active_flag');
     }
 }

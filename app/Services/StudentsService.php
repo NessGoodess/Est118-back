@@ -54,6 +54,10 @@ class StudentsService
 
         if (array_key_exists('address', $data) && is_array($data['address'])) {
             $addressPayload = $data['address'];
+            if (array_key_exists('apartament_number', $addressPayload) && ! array_key_exists('unit_number', $addressPayload)) {
+                $addressPayload['unit_number'] = $addressPayload['apartament_number'];
+            }
+            unset($addressPayload['apartament_number']);
             if ($profile->address) {
                 $profile->address->fill($addressPayload);
                 $profile->address->save();

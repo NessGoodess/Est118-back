@@ -50,7 +50,14 @@ class AcademicYearController extends Controller
 
     public function activate(AcademicYear $academicYear): JsonResponse
     {
-        $year = $this->academicYearService->activate($academicYear);
+        try {
+            $year = $this->academicYearService->activate($academicYear);
+        } catch (\RuntimeException $exception) {
+            return response()->json([
+                'success' => false,
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
 
         return response()->json([
             'success' => true,

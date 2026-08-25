@@ -26,6 +26,11 @@ protected $fillable = [
         'address_id',
     ];
 
+    public function setNationalIdAttribute(?string $value): void
+    {
+        $this->attributes['national_id'] = $value === null ? null : strtoupper(trim($value));
+    }
+
     /**
      * Get the user that owns the profile
      *

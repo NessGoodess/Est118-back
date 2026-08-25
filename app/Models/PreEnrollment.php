@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class PreEnrollment extends Model
 {
@@ -62,6 +63,14 @@ class PreEnrollment extends Model
         'study_certificate_path',
         'photo_path',
         'converted_student_id',
+        'converted_enrollment_id',
+        'reviewed_by',
+        'reviewed_at',
+        'review_notes',
+        'converted_by',
+        'converted_at',
+        'conversion_options',
+        'conversion_policy_snapshot',
     ];
 
     protected $casts = [
@@ -72,15 +81,55 @@ class PreEnrollment extends Model
         'payment_status' => PaymentStatus::class,
         'current_average' => 'decimal:2',
         'admission_exam_score' => 'decimal:2',
+        'reviewed_at' => 'datetime',
+        'converted_at' => 'datetime',
+        'conversion_options' => 'array',
+        'conversion_policy_snapshot' => 'array',
     ];
+
+    public function setCurpAttribute(?string $value): void
+    {
+        $this->attributes['curp'] = $value === null ? null : strtoupper(trim($value));
+    }
+
+    public function setGuardianCurpAttribute(?string $value): void
+    {
+        $this->attributes['guardian_curp'] = $value === null ? null : strtoupper(trim($value));
+    }
 
     public function convertedStudent(): BelongsTo
     {
         return $this->belongsTo(Student::class, 'converted_student_id');
     }
 
+    public function convertedEnrollment(): BelongsTo
+    {
+        return $this->belongsTo(Enrollment::class, 'converted_enrollment_id');
+    }
+
+    public function reviewedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function convertedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'converted_by');
+    }
+
     protected static function booted()
     {
+        static::saving(function (self $preEnrollment) {
+            // SQLite keeps a plain curp_normalized column; MySQL uses a generated one.
+            if (DB::getDriverName() === 'mysql') {
+                return;
+            }
+            if (! Schema::hasColumn('pre_enrollments', 'curp_normalized')) {
+                return;
+            }
+            $preEnrollment->attributes['curp_normalized'] = $preEnrollment->attributes['curp'] ?? null;
+        });
+
         static::creating(function ($preEnrollment) {
 
             if ($preEnrollment->folio) {

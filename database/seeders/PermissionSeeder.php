@@ -36,6 +36,8 @@ class PermissionSeeder extends Seeder
             'create pre-enrollments',
             'edit pre-enrollments',
             'delete pre-enrollments',
+            'view admission enrollment',
+            'edit admission enrollment',
             'manage admission cycles',
             'manage re-enrollment',
 
@@ -80,6 +82,24 @@ class PermissionSeeder extends Seeder
         Role::findOrCreate('pre-enrollment-admin', 'web');
 
         $adminRole->syncPermissions(Permission::all());
+
+        // Roles that managed the whole pre-enrollment flow before the split
+        // keep access to the admission enrollment process.
+        $legacyAdmissionRoles = Role::query()
+            ->whereHas('permissions', fn ($query) => $query->whereIn('name', [
+                'edit pre-enrollments',
+                'manage admission cycles',
+            ]))
+            ->get();
+
+        foreach ($legacyAdmissionRoles as $role) {
+            $role->givePermissionTo([
+                'create pre-enrollments',
+                'delete pre-enrollments',
+                'view admission enrollment',
+                'edit admission enrollment',
+            ]);
+        }
 
         $this->command->info('Permissions and roles created successfully');
         $this->command->info('Admin role synced with all permissions.');

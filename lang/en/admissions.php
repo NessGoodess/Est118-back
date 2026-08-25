@@ -28,7 +28,7 @@ return [
      'deleted_success' => 'Ciclo eliminado correctamente',
 
      'error_processing' => 'Ocurrió un error al procesar su preinscripción. Intente nuevamente más tarde o porfavor comuníquese con la institución.',
-     'created_success' => 'Preinscripción creada exitosamente',
+     'created_success' => 'Pre-enrollment application received successfully',
 
      'no_active_cycle' => 'No hay un ciclo activo',
 
@@ -55,16 +55,31 @@ return [
       */
 
      'to_student' => [
-        'already_converted' => 'Esta preinscripción ya fue convertida en estudiante.',
-        'documents_incomplete' => 'Los documentos deben estar marcados como completos.',
-        'payment_not_validated' => 'El pago debe estar validado antes de completar la inscripción.',
-        'rejected_application' => 'No se puede inscribir una preinscripción rechazada.',
-        'student_profile_exists' => 'Ya existe un alumno registrado con el CURP proporcionado.',
-        'no_academic_year' => 'No hay un ciclo escolar activo o seleccionado.',
-        'group_not_in_academic_year' => 'El grupo seleccionado no pertenece al ciclo escolar indicado.',
-        'first_grade_not_found' => 'No se encontró el grado «1°» en el catálogo.',
-        'default_group_not_found' => 'No existe un grupo provisional de 1° para este ciclo escolar. Cree los grupos o envíe class_group_id.',
-        'already_enrolled' => 'El estudiante ya cuenta con una matrícula activa en este ciclo escolar.',
+        'already_converted' => 'This pre-enrollment has already been converted to a student.',
+        'pre_enrollment_not_found' => 'The pre-enrollment no longer exists.',
+        'rejected_application' => 'A rejected pre-enrollment cannot be enrolled.',
+        'review_required' => 'Accept the application first to move it to “In process”.',
+        'documents_incomplete' => 'Documents must be marked as complete.',
+        'payment_not_validated' => 'Payment must be validated before enrollment can be completed.',
+        'data_incomplete' => 'Applicant is missing required data (name, CURP, or previous school).',
+        'exam_required' => 'An admission exam score is required before enrollment.',
+        'curp_required' => 'The applicant does not have a captured CURP.',
+        'student_profile_exists' => 'A student is already registered with the provided CURP.',
+        'no_academic_year' => 'There is no active or selected academic year.',
+        'academic_year_not_found' => 'The selected academic year does not exist.',
+        'late_intake_disabled' => 'Late admissions are disabled in the intake policy.',
+        'late_group_required' => 'For late admission you must choose the group manually.',
+        'class_group_not_found' => 'The selected class group does not exist.',
+        'group_not_in_academic_year' => 'The selected group does not belong to the indicated academic year.',
+        'first_grade_not_found' => 'Grade «1°» was not found in the catalog.',
+        'default_group_not_found' => 'There is no provisional 1° group for this academic year. Create the groups or send class_group_id.',
+        'already_enrolled' => 'The student already has an active enrollment in this academic year.',
+        'conversion_state_incomplete' => 'The pre-enrollment is marked as converted, but its original student or enrollment could not be found.',
+        'conversion_conflict' => 'The conversion conflicted with a record created concurrently. Refresh the application and try again.',
+        'persistence_error' => 'The enrollment could not be saved. Please try again.',
+        'conversion_failed' => 'An unexpected error occurred while creating the enrollment.',
+        'converted_success' => 'Student enrolled successfully.',
+        'replayed_success' => 'The enrollment already existed; the original result was returned.',
     ],
 
 ];

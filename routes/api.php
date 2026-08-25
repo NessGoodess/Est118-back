@@ -1,35 +1,39 @@
 <?php
-//controllers
+
+// controllers
+use App\Enums\ServiceAbility;
+use App\Http\Controllers\AcademicYearPromotionController;
+use App\Http\Controllers\Admission\AdmissionConversionBatchController;
 use App\Http\Controllers\Admission\AdmissionCycleController;
+use App\Http\Controllers\Admission\AdmissionIntakeSettingsController;
+use App\Http\Controllers\Admission\FirstGradeGroupsController;
+use App\Http\Controllers\Admission\PreEnrollmentController;
+use App\Http\Controllers\Admission\PreEnrollmentExportController;
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\AttendanceSettingsController;
+use App\Http\Controllers\Auth\ChangePasswordController;
+use App\Http\Controllers\EnrollmentPromotionController;
+use App\Http\Controllers\FirstGradeGroupAssignmentController;
+use App\Http\Controllers\GeneralAttendanceController;
 use App\Http\Controllers\NfcCredentialController;
 use App\Http\Controllers\NfcReaderSlotController;
-use App\Http\Controllers\Admission\PreEnrollmentController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ScheduleController;
+// enums
+use App\Http\Controllers\School\AcademicYearController;
+use App\Http\Controllers\School\ReEnrollmentApplicationController;
+use App\Http\Controllers\School\ReEnrollmentPeriodController;
 use App\Http\Controllers\StudentController;
-use App\Http\Controllers\TelegramController;
-use App\Http\Controllers\Auth\ChangePasswordController;
-use App\Http\Controllers\GeneralAttendanceController;
-use App\Http\Controllers\AttendanceSettingsController;
-use App\Http\Controllers\UserController;
-use App\Http\Controllers\AnnouncementController;
-use App\Http\Controllers\EnrollmentPromotionController;
-use App\Http\Controllers\AcademicYearPromotionController;
-use App\Http\Controllers\FirstGradeGroupAssignmentController;
-//enums
-use App\Enums\ServiceAbility;
-use App\Http\Controllers\Admission\PreEnrollmentExportController;
+use App\Http\Controllers\StudentCredentialPrintingController;
 use App\Http\Controllers\students\GradeLevelController;
 use App\Http\Controllers\students\PrivateImageController;
-use App\Http\Controllers\StudentCredentialPrintingController;
-use App\Http\Controllers\NotificationController;
-use App\Http\Controllers\School\ReEnrollmentPeriodController;
-use App\Http\Controllers\School\ReEnrollmentApplicationController;
-use App\Http\Controllers\School\AcademicYearController;
-//resources
+use App\Http\Controllers\TelegramController;
+use App\Http\Controllers\UserController;
+// resources
+use App\Http\Resources\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Resources\UserResource;
 
 /**
  * Routes
@@ -78,7 +82,7 @@ Route::prefix('reader')->group(function () {
     Route::post('/read-event', [NfcCredentialController::class, 'read'])
         ->middleware([
             'auth:sanctum',
-            'service.token:' . ServiceAbility::NFC_READER->value,
+            'service.token:'.ServiceAbility::NFC_READER->value,
         ]);
 
     Route::middleware([
@@ -120,8 +124,6 @@ Route::prefix('attendance')->middleware(['auth:sanctum', 'verified'])->group(fun
     Route::get('/recent-readings', [GeneralAttendanceController::class, 'recentReadings'])
         ->middleware('permission:manage nfc readings');
 });
-
-
 
 Route::post('/telegram/webhook', [TelegramController::class, 'webhook']);
 
@@ -167,15 +169,40 @@ Route::prefix('admissions')->group(function () {
         Route::get('/{preEnrollment}', [PreEnrollmentController::class, 'show']);
         Route::patch('/{preEnrollment}', [PreEnrollmentController::class, 'update']);
         Route::patch('/{preEnrollment}/process', [PreEnrollmentController::class, 'updateProcess']);
-        Route::post('/{preEnrollment}/convert-student', [PreEnrollmentController::class, 'convertToStudent']);
+        Route::post('/{preEnrollment}/initial-review', [PreEnrollmentController::class, 'initialReview']);
+        Route::post('/{preEnrollment}/convert-student', [PreEnrollmentController::class, 'convertToStudent'])
+            ->missing(fn () => response()->json([
+                'success' => false,
+                'error_code' => 'pre_enrollment_not_found',
+                'message' => __('admissions.to_student.pre_enrollment_not_found'),
+            ], 404));
         Route::post('/{preEnrollment}/resent-pdf-folio', [PreEnrollmentController::class, 'resentPdfFolio']);
     })->middleware('auth:sanctum', 'verified');
 
+    Route::prefix('conversion-batches')
+        ->middleware(['auth:sanctum', 'verified'])
+        ->group(function () {
+            Route::post('/', [AdmissionConversionBatchController::class, 'store']);
+            Route::get('/{batch}', [AdmissionConversionBatchController::class, 'show']);
+            Route::post('/{batch}/retry-failed', [AdmissionConversionBatchController::class, 'retryFailed']);
+        });
 
-    //Promotion routes
-    Route::prefix('enrollments')->middleware(['auth:sanctum', 'verified', 'permission:manage admission cycles'])->group(function () {
-        Route::get('/pending-decisions', [EnrollmentPromotionController::class, 'pendingDecisions']);
-        Route::patch('/{enrollment}/promotion-decision', [EnrollmentPromotionController::class, 'updateDecision']);
+    Route::prefix('intake-settings')
+        ->middleware(['auth:sanctum', 'verified'])
+        ->group(function () {
+            Route::get('/', [AdmissionIntakeSettingsController::class, 'show']);
+            Route::put('/', [AdmissionIntakeSettingsController::class, 'update']);
+        });
+
+    Route::get('/academic-years/{academicYear}/first-grade-groups', [FirstGradeGroupsController::class, 'index'])
+        ->middleware(['auth:sanctum', 'verified']);
+
+    // Promotion routes
+    Route::prefix('enrollments')->middleware(['auth:sanctum', 'verified'])->group(function () {
+        Route::get('/pending-decisions', [EnrollmentPromotionController::class, 'pendingDecisions'])
+            ->middleware('permission:manage admission cycles|manage re-enrollment');
+        Route::patch('/{enrollment}/promotion-decision', [EnrollmentPromotionController::class, 'updateDecision'])
+            ->middleware('permission:manage admission cycles|manage re-enrollment');
         Route::post('/first-grade-group-assignment', [FirstGradeGroupAssignmentController::class, 'assign']);
     });
 });
@@ -186,7 +213,7 @@ Route::prefix('admissions')->group(function () {
 Route::prefix('academic-years')
     ->middleware(['auth:sanctum', 'verified'])
     ->group(function () {
- 
+
         Route::get('/', [AcademicYearController::class, 'index'])
             ->middleware('permission:view academic years|manage re-enrollment|manage admission cycles');
         Route::post('/', [AcademicYearController::class, 'store'])
@@ -276,13 +303,12 @@ Route::middleware('auth:sanctum', 'verified')->group(function () {
     Route::get('/permissions', [UserController::class, 'permissions']);
 });
 
-
 /**
  * student management
  */
 Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(function () {
 
-  Route::get('/grades', [GradeLevelController::class, 'index'])
+    Route::get('/grades', [GradeLevelController::class, 'index'])
         ->middleware('permission:view students');
 
     Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
@@ -327,12 +353,9 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
         ->middleware('permission:manage student photos');
 });
 
-
 Route::get('/private-image/{id}', [PrivateImageController::class, 'showById'])
     ->whereNumber('id')
     ->middleware('signed')
     ->name('private.image');
 
-
-
-require __DIR__ . '/service.php';
+require __DIR__.'/service.php';

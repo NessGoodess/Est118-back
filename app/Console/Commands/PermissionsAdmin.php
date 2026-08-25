@@ -54,8 +54,11 @@ class PermissionsAdmin extends Command
         $adminRole->givePermissionTo(Permission::all());
         $preEnrollmentAdminRole->givePermissionTo(
             'view pre-enrollments',
+            'create pre-enrollments',
             'edit pre-enrollments',
-            'manage admission cycles',
+            'delete pre-enrollments',
+            'view admission enrollment',
+            'edit admission enrollment',
             'manage re-enrollment'
         );
 

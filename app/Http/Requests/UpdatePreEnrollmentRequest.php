@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Models\PreEnrollment;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
 
 class UpdatePreEnrollmentRequest extends FormRequest
 {
@@ -12,6 +14,29 @@ class UpdatePreEnrollmentRequest extends FormRequest
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $preEnrollment = $this->route('preEnrollment');
+
+        if ($preEnrollment instanceof PreEnrollment && $preEnrollment->converted_student_id) {
+            throw new HttpResponseException(response()->json([
+                'success' => false,
+                'message' => 'Esta solicitud ya fue inscrita y no se puede modificar.',
+            ], 422));
+        }
+
+        $merge = [];
+        if ($this->has('curp')) {
+            $merge['curp'] = strtoupper(trim((string) $this->input('curp')));
+        }
+        if ($this->has('guardian_curp')) {
+            $merge['guardian_curp'] = strtoupper(trim((string) $this->input('guardian_curp')));
+        }
+        if ($merge !== []) {
+            $this->merge($merge);
+        }
     }
 
     /**
@@ -38,7 +63,6 @@ class UpdatePreEnrollmentRequest extends FormRequest
             'place_of_birth' => 'required|string|max:100',
             'previous_school' => 'required|string|max:100',
             'current_average' => 'required|numeric|between:0,10',
-            'admission_exam_score' => 'nullable|numeric|between:0,10',
             'has_siblings' => 'required|boolean',
             'siblings_details' => 'nullable|string|max:255',
             'street_type' => 'required|string|max:100',

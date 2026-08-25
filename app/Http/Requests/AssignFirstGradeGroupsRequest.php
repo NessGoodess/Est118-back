@@ -16,7 +16,7 @@ class AssignFirstGradeGroupsRequest extends FormRequest
     {
         return [
             'academic_year_id' => ['required', 'integer', 'min:1'],
-            'score_source' => ['required', Rule::in(['school_average', 'admission_exam'])],
+            'score_source' => ['sometimes', 'nullable', Rule::in(['school_average', 'admission_exam', 'combined'])],
             'dry_run' => ['sometimes', 'boolean'],
             'overrides' => ['sometimes', 'array'],
             'overrides.*.enrollment_id' => ['required_with:overrides', 'integer', 'min:1'],
@@ -24,4 +24,3 @@ class AssignFirstGradeGroupsRequest extends FormRequest
         ];
     }
 }
-

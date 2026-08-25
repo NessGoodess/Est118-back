@@ -2,8 +2,9 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\PreEnrollmentStatus;
+use App\Services\AdmissionIdempotencyService;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
 
 class StorePreEnrollmentRequest extends FormRequest
 {
@@ -13,6 +14,39 @@ class StorePreEnrollmentRequest extends FormRequest
     public function authorize(): bool
     {
         return true;
+    }
+
+    /**
+     * Replay before CURP unique validation so retries with the same key
+     * return the original folio instead of a 422.
+     */
+    protected function prepareForValidation(): void
+    {
+        $scope = $this->is('api/admissions/pre-enrollment')
+            ? AdmissionIdempotencyService::SCOPE_PUBLIC_STORE
+            : AdmissionIdempotencyService::SCOPE_ADMIN_STORE;
+
+        $early = app(AdmissionIdempotencyService::class)->resolve($this, $scope);
+        if ($early) {
+            throw new HttpResponseException($early);
+        }
+
+        $merge = [];
+        if ($this->has('applicantInfo.curp')) {
+            $merge['applicantInfo'] = array_merge(
+                (array) $this->input('applicantInfo', []),
+                ['curp' => strtoupper(trim((string) $this->input('applicantInfo.curp')))]
+            );
+        }
+        if ($this->has('guardianInfo.guardianCurp')) {
+            $merge['guardianInfo'] = array_merge(
+                $merge['guardianInfo'] ?? (array) $this->input('guardianInfo', []),
+                ['guardianCurp' => strtoupper(trim((string) $this->input('guardianInfo.guardianCurp')))]
+            );
+        }
+        if ($merge !== []) {
+            $this->merge($merge);
+        }
     }
 
     /**
@@ -57,11 +91,9 @@ class StorePreEnrollmentRequest extends FormRequest
             'workshopSelect.workshopSecondChoice' => 'required|string|max:100',
             'tuitionVoucher.hasSchoolVoucher' => 'required|boolean',
             'tuitionVoucher.schoolVoucherFolio' => 'exclude_if:tuitionVoucher.hasSchoolVoucher,false|required|string|max:100',
-
+            '_idempotency_key' => 'sometimes|nullable|string|max:128',
         ];
     }
-
-    //CURP validation messages
 
     public function messages(): array
     {
@@ -74,5 +106,4 @@ class StorePreEnrollmentRequest extends FormRequest
             'guardianInfo.guardianCurp.size' => 'La CURP del tutor debe tener 18 caracteres.',
         ];
     }
-    
 }

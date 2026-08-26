@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Address;
 use App\Models\Student;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\URL;
 use RuntimeException;
 
 class StudentsService
@@ -107,8 +106,9 @@ class StudentsService
             'currentEnrollment.classGroup:id,name,grade_level_id',
         ])->findOrFail($studentId);
 
-        $filename = $student->profile?->profile_picture;
-        $hasPhoto = ! empty($filename);
+        $pathService = app(StudentPhotoPathService::class);
+        $hasPhoto = $pathService->fileExists($student, 'profile')
+            || $pathService->fileExists($student, 'original');
 
         return [
             'student_id' => $student->id,
@@ -116,7 +116,7 @@ class StudentsService
             'has_photo' => $hasPhoto,
             'action_label' => $hasPhoto ? 'Renovar' : 'Capturar',
             'photo_url' => $hasPhoto
-                ? $this->signedPhotoUrl($student->id, $filename, $student->profile?->updated_at, 'profile')
+                ? $pathService->signedUrl($student, 'profile')
                 : null,
             'grade' => $student->currentEnrollment?->classGroup?->gradeLevel?->name,
             'group' => $student->currentEnrollment?->classGroup?->name,
@@ -124,6 +124,7 @@ class StudentsService
     }
 
     /**
+     * @deprecated Prefer StudentPhotoPathService::signedUrl($student, $size)
      * @param  mixed  $updatedAt
      */
     public function signedPhotoUrl(int $studentId, ?string $photo, $updatedAt, string $size = 'thumb'): ?string
@@ -132,19 +133,16 @@ class StudentsService
             return null;
         }
 
-        $version = null;
-        if ($updatedAt && method_exists($updatedAt, 'timestamp')) {
-            $version = $updatedAt->timestamp;
+        $student = Student::with([
+            'profile:id,profile_picture,updated_at',
+            'currentEnrollment.classGroup.gradeLevel:id,name',
+            'currentEnrollment.classGroup:id,name,grade_level_id',
+        ])->find($studentId);
+
+        if (! $student) {
+            return null;
         }
 
-        return URL::temporarySignedRoute(
-            'private.image',
-            now()->addMinutes(60),
-            [
-                'id' => $studentId,
-                'size' => $size,
-                'v' => $version ?? time(),
-            ]
-        );
+        return app(StudentPhotoPathService::class)->signedUrl($student, $size);
     }
 }

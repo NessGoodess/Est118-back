@@ -39,9 +39,13 @@ class GenerateStudentThumbnails extends Command
 
         foreach ($files as $file) {
 
+            // Skip stable layout (already named thumb.jpg / profile.jpg / original.*)
             if (
+                str_contains($file, '/current/') ||
+                str_contains($file, '/versions/') ||
                 str_contains($file, 'thumb_') ||
-                str_contains($file, 'profile_')
+                str_contains($file, 'profile_') ||
+                preg_match('#/(?:thumb|profile|original)\.[^/]+$#', $file)
             ) {
                 continue;
             }

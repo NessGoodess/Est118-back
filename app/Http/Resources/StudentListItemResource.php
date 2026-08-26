@@ -2,7 +2,7 @@
 
 namespace App\Http\Resources;
 
-use App\Services\StudentsService;
+use App\Services\StudentPhotoPathService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -18,7 +18,7 @@ class StudentListItemResource extends JsonResource
         $student = $this->resource;
         $enrollment = $student->enrollments->where('status', 'active')->first()
             ?? $student->enrollments->first();
-        $photos = app(StudentsService::class);
+        $photos = app(StudentPhotoPathService::class);
 
         $grade = optional($enrollment?->classGroup?->gradeLevel)?->name ?? 'N/A';
         $group = optional($enrollment?->classGroup)?->name ?? 'N/A';
@@ -36,12 +36,7 @@ class StudentListItemResource extends JsonResource
             'current_grade' => $grade,
             'current_group' => $group,
             'photo_url' => $this->canSeeStudentPhotos($request)
-                ? $photos->signedPhotoUrl(
-                    $student->id,
-                    $student->profile?->profile_picture,
-                    $student->profile?->updated_at,
-                    'profile'
-                )
+                ? $photos->signedUrl($student, 'profile')
                 : null,
         ];
     }

@@ -294,19 +294,22 @@ class CredentialPrintingService
      */
     public function originalPhotoRelativePath(Student $student, ClassGroup $classGroup): ?string
     {
-        $student->loadMissing('profile');
-        $filename = $student->profile?->profile_picture;
-        if (! $filename) {
-            return null;
-        }
-        $classGroup->loadMissing('gradeLevel');
-        $grade = $classGroup->gradeLevel?->name;
-        $group = $classGroup->name;
-        if (! $grade || ! $group) {
-            return null;
+        $student->loadMissing([
+            'profile',
+            'currentEnrollment.classGroup.gradeLevel:id,name',
+            'currentEnrollment.classGroup:id,name,grade_level_id',
+        ]);
+
+        $pathService = app(StudentPhotoPathService::class);
+        $path = $pathService->resolveRelativePath($student, 'original');
+
+        if ($path && Storage::disk('private')->exists($path)) {
+            return $path;
         }
 
-        return "photos/students/{$grade}/{$group}/{$filename}";
+        $profile = $pathService->resolveRelativePath($student, 'profile');
+
+        return ($profile && Storage::disk('private')->exists($profile)) ? $profile : null;
     }
 
     /**

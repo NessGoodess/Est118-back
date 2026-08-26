@@ -6,6 +6,7 @@ use App\Http\Requests\UpdateStudentRequest;
 use App\Http\Resources\StudentDetailResource;
 use App\Http\Resources\StudentListItemResource;
 use App\Models\Student;
+use App\Services\StudentPhotoPathService;
 use App\Services\StudentPhotoService;
 use App\Services\StudentsService;
 use Illuminate\Http\Request;
@@ -105,18 +106,16 @@ class StudentController extends Controller
             'photo' => ['required', 'file', 'image', 'max:8192'],
         ]);
 
-        $student = Student::with(['profile', 'currentEnrollment.classGroup.gradeLevel', 'currentEnrollment.classGroup'])
-            ->findOrFail($studentId);
+        $student = Student::with(['profile'])->findOrFail($studentId);
 
         $result = $this->studentPhotoService->storeStudentPhoto($student, $request->file('photo'));
 
-        $student->refresh()->load('profile');
-        $photoUrl = $this->studentsService->signedPhotoUrl(
-            $student->id,
-            $student->profile?->profile_picture,
-            $student->profile?->updated_at,
-            'profile'
-        );
+        $student->refresh()->load([
+            'profile',
+            'currentEnrollment.classGroup.gradeLevel',
+            'currentEnrollment.classGroup',
+        ]);
+        $photoUrl = app(StudentPhotoPathService::class)->signedUrl($student, 'profile');
 
         return response()->json([
             'success' => true,

@@ -8,8 +8,18 @@ use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Drivers\Gd\Driver;
 use Intervention\Image\ImageManager;
 
+/**
+ * Persist student photos under a stable student_id layout.
+ *
+ * photos/students/{id}/current/{original,profile,thumb}
+ * photos/students/{id}/versions/{YmdHis}/...  (previous current on renew)
+ */
 class StudentPhotoService
 {
+    public function __construct(
+        private readonly StudentPhotoPathService $photoPathService
+    ) {}
+
     /**
      * Store original + optimized profile/thumb images for a student.
      *
@@ -23,55 +33,90 @@ class StudentPhotoService
             'currentEnrollment.classGroup:id,name,grade_level_id',
         ]);
 
-        $grade = $student->currentEnrollment?->classGroup?->gradeLevel?->name;
-        $group = $student->currentEnrollment?->classGroup?->name;
-        if (! $grade || ! $group) {
-            throw new \RuntimeException('El alumno no tiene grupo/grado activo para guardar la foto.');
-        }
-
-        $directory = "photos/students/{$grade}/{$group}";
+        $disk = Storage::disk('private');
+        $currentDir = $this->photoPathService->stableCurrentDirectory($student->id);
         $manager = new ImageManager(new Driver());
 
         $ext = strtolower($photo->getClientOriginalExtension() ?: 'jpg');
         if (! in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
             $ext = 'jpg';
         }
+        if ($ext === 'jpeg') {
+            $ext = 'jpg';
+        }
 
-        $filename = sprintf('student_%d_%s.%s', $student->id, now()->format('YmdHis'), $ext);
-        $fullOriginalPath = "{$directory}/{$filename}";
+        // Archive previous current/ before replacing.
+        $this->archiveCurrentIfPresent($student->id);
 
-        // Keep original uploaded file
-        Storage::disk('private')->putFileAs($directory, $photo, $filename);
-        $sourcePath = Storage::disk('private')->path($fullOriginalPath);
+        // Also clean legacy grade/group files when upgrading from old layout.
+        $this->deleteLegacyFilesIfAny($student);
 
-        // Generate optimized variants (same behavior as command).
+        $disk->makeDirectory($currentDir);
+
+        $originalName = "original.{$ext}";
+        $fullOriginalPath = "{$currentDir}/{$originalName}";
+        $disk->putFileAs($currentDir, $photo, $originalName);
+        $sourcePath = $disk->path($fullOriginalPath);
+
         $image = $manager->read($sourcePath);
         $thumb = $image->cover(40, 40)->toJpeg(75);
-        Storage::disk('private')->put("{$directory}/thumb_{$filename}", (string) $thumb);
+        $disk->put("{$currentDir}/thumb.jpg", (string) $thumb);
 
         $image = $manager->read($sourcePath);
         $profile = $image->scale(width: 400)->toJpeg(80);
-        Storage::disk('private')->put("{$directory}/profile_{$filename}", (string) $profile);
+        $disk->put("{$currentDir}/profile.jpg", (string) $profile);
 
-        // Optional cleanup of previous files if they existed in same directory.
-        $previous = $student->profile?->profile_picture;
-        if ($previous && $previous !== $filename) {
-            foreach ([$previous, "thumb_{$previous}", "profile_{$previous}"] as $old) {
-                $oldPath = "{$directory}/{$old}";
-                if (Storage::disk('private')->exists($oldPath)) {
-                    Storage::disk('private')->delete($oldPath);
-                }
-            }
-        }
-
-        $student->profile?->update(['profile_picture' => $filename]);
+        $dbValue = $this->photoPathService->stableProfilePictureValue($student->id);
+        $student->profile?->update(['profile_picture' => $dbValue]);
 
         return [
-            'filename' => $filename,
+            'filename' => $dbValue,
             'path_original' => $fullOriginalPath,
-            'path_profile' => "{$directory}/profile_{$filename}",
-            'path_thumb' => "{$directory}/thumb_{$filename}",
+            'path_profile' => "{$currentDir}/profile.jpg",
+            'path_thumb' => "{$currentDir}/thumb.jpg",
         ];
     }
-}
 
+    private function archiveCurrentIfPresent(int $studentId): void
+    {
+        $disk = Storage::disk('private');
+        $currentDir = $this->photoPathService->stableCurrentDirectory($studentId);
+
+        if (! $disk->exists($currentDir)) {
+            return;
+        }
+
+        $files = $disk->files($currentDir);
+        if ($files === []) {
+            return;
+        }
+
+        $versionDir = $this->photoPathService->stableVersionsDirectory($studentId).'/'.now()->format('YmdHis');
+        $disk->makeDirectory($versionDir);
+
+        foreach ($files as $file) {
+            $disk->move($file, $versionDir.'/'.basename($file));
+        }
+    }
+
+    private function deleteLegacyFilesIfAny(Student $student): void
+    {
+        $previous = $student->profile?->profile_picture;
+        if (! $previous || str_contains($previous, '/')) {
+            return;
+        }
+
+        $base = $this->photoPathService->resolveLegacyBaseDirectory($student);
+        if (! $base) {
+            return;
+        }
+
+        $disk = Storage::disk('private');
+        foreach ([$previous, "thumb_{$previous}", "profile_{$previous}"] as $old) {
+            $oldPath = "{$base}/{$old}";
+            if ($disk->exists($oldPath)) {
+                $disk->delete($oldPath);
+            }
+        }
+    }
+}

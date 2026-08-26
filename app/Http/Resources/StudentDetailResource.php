@@ -2,7 +2,7 @@
 
 namespace App\Http\Resources;
 
-use App\Services\StudentsService;
+use App\Services\StudentPhotoPathService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -17,7 +17,7 @@ class StudentDetailResource extends JsonResource
         /** @var \App\Models\Student $student */
         $student = $this->resource;
         $profile = $student->profile;
-        $photos = app(StudentsService::class);
+        $photos = app(StudentPhotoPathService::class);
         $currentEnrollment = $student->enrollments->where('status', 'active')->first();
         $address = $profile?->relationLoaded('address') ? $profile->address : null;
 
@@ -40,9 +40,9 @@ class StudentDetailResource extends JsonResource
                 'profile_updated_at' => $profile?->updated_at,
             ],
             'photos' => $this->canSeeStudentPhotos($request) ? [
-                'thumbnail_url' => $photos->signedPhotoUrl($student->id, $profile?->profile_picture, $profile?->updated_at, 'thumb'),
-                'profile_url' => $photos->signedPhotoUrl($student->id, $profile?->profile_picture, $profile?->updated_at, 'profile'),
-                'original_url' => $photos->signedPhotoUrl($student->id, $profile?->profile_picture, $profile?->updated_at, 'original'),
+                'thumbnail_url' => $photos->signedUrl($student, 'thumb'),
+                'profile_url' => $photos->signedUrl($student, 'profile'),
+                'original_url' => $photos->signedUrl($student, 'original'),
             ] : null,
             'address_detail' => $address ? [
                 'street_type' => $address->street_type,

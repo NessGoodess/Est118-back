@@ -17,8 +17,25 @@ class TelegramFlowService
 
     public function handle($update): void
     {
+        $chatId = null;
+
         try {
+            
+            $chatType = $update->getMessage()
+                ? $update->getMessage()->getChat()->type
+                : $update->getCallbackQuery()?->getMessage()?->getChat()?->type;
+
+            if ($chatType !== 'private') {
+                return;
+            }
+
             $chatId = $this->getChatId($update);
+
+            $announcementsChatId = config('telegram.announcements.chat_id');
+            if ($announcementsChatId !== null && $announcementsChatId !== ''
+                && (string) $chatId === (string) $announcementsChatId) {
+                return;
+            }
 
             $session = TelegramSession::firstOrCreate(
                 ['chat_id' => $chatId],

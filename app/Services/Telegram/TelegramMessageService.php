@@ -209,6 +209,11 @@ class TelegramMessageService
         $students = $guardian->students;
         $studentList = $students->map(fn($s) => "• {$s->profile->first_name} {$s->profile->last_name}")->join("\n");
 
+        $keyboard = [
+            [['text' => Emojis::PLUS_BUTTON . ' Agregar otro estudiante', 'callback_data' => 'add_another']],
+            [['text' => Emojis::CHECK_MARK_BUTTON . ' Finalizar', 'callback_data' => 'done']],
+        ];
+
         Telegram::sendMessage([
             'chat_id' => $chatId,
             'text' => Emojis::CHECK_MARK_BUTTON . " *¡Cuenta vinculada exitosamente!*\n\n" .
@@ -218,29 +223,67 @@ class TelegramMessageService
                 "• Asistencias y retardos de entradas y salidas\n" .
                 "¿Tiene más hijos en la escuela?",
             'parse_mode' => 'Markdown',
-            'reply_markup' => json_encode([
-                'inline_keyboard' => [
-                    [['text' => Emojis::PLUS_BUTTON . ' Agregar otro estudiante', 'callback_data' => 'add_another']],
-                    [['text' => Emojis::CHECK_MARK_BUTTON . ' Finalizar', 'callback_data' => 'done']]
-                ]
-            ])
+            'reply_markup' => json_encode(['inline_keyboard' => $keyboard]),
         ]);
+
+        $this->sendAnnouncementsChannelInvite($chatId);
     }
 
     public function completedMenu(int $chatId): void
     {
+        $keyboard = [
+            [['text' => Emojis::PLUS_BUTTON . ' Agregar otro estudiante', 'callback_data' => 'add_another']],
+        ];
+
+        if ($row = $this->announcementsChannelButton()) {
+            $keyboard[] = [$row];
+        }
+
         Telegram::sendMessage([
             'chat_id' => $chatId,
             'text' => Emojis::WAVING_HAND . " *Gracias por usar nuestro sistema*\n\n" .
-                "Su cuenta está lista para recibir notificaciones.\n\n" .
+                "Su cuenta está lista para recibir notificaciones de entrada y salida.\n\n" .
                 "¿Necesita vincular otro estudiante?",
             'parse_mode' => 'Markdown',
-            'reply_markup' => json_encode([
-                'inline_keyboard' => [
-                    [['text' => Emojis::PLUS_BUTTON . ' Agregar otro estudiante', 'callback_data' => 'add_another']]
-                ]
-            ])
+            'reply_markup' => json_encode(['inline_keyboard' => $keyboard]),
         ]);
+    }
+
+    /**
+     * Optional CTA to the private school announcements channel (invite link from .env).
+     */
+    public function sendAnnouncementsChannelInvite(int $chatId): void
+    {
+        $button = $this->announcementsChannelButton();
+        if ($button === null) {
+            return;
+        }
+
+        Telegram::sendMessage([
+            'chat_id' => $chatId,
+            'text' => Emojis::LOUD_SPEAKER . " *Canal de avisos escolares*\n\n" .
+                "También puede unirse al canal de la escuela para recibir comunicados con enlace al detalle.\n\n" .
+                "Es *opcional*.\n\n" .
+                "Las entradas y salidas seguirán llegando aquí, en el chat del bot.",
+            'parse_mode' => 'Markdown',
+            'reply_markup' => json_encode([
+                'inline_keyboard' => [[$button]],
+            ]),
+        ]);
+    }
+
+    /** @return array{text: string, url: string}|null */
+    private function announcementsChannelButton(): ?array
+    {
+        $link = trim((string) config('telegram.announcements.invite_link', ''));
+        if ($link === '' || ! filter_var($link, FILTER_VALIDATE_URL)) {
+            return null;
+        }
+
+        return [
+            'text' => Emojis::LOUD_SPEAKER . ' Unirme al canal de avisos',
+            'url' => $link,
+        ];
     }
     public function telegramAccountLinkedToAnother(int $chatId): void
     {

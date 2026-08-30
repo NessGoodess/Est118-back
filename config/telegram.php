@@ -62,6 +62,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | School announcements channel (optional)
+    |--------------------------------------------------------------------------
+    |
+    | Private channel / group where published avisos are broadcast.
+    | Invite link is sent only after guardian CURP linking succeeds.
+    | Discover chat_id: post /channel_id in the channel, or forward a channel
+    | message to the bot in private.
+    |
+    */
+    'announcements' => [
+        'chat_id' => env('TELEGRAM_ANNOUNCEMENTS_CHAT_ID'),
+        'invite_link' => env('TELEGRAM_ANNOUNCEMENTS_INVITE_LINK'),
+        'queue' => env('TELEGRAM_ANNOUNCEMENTS_QUEUE', 'default'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Asynchronous Requests [Optional]
     |--------------------------------------------------------------------------
     |

@@ -31,12 +31,14 @@ class Announcement extends Model
         'media_youtube_id',
         'media_alt',
         'media_ratio',
+        'media_position',
         'published_at',
         'author',
         'type',
         'important',
         'summary',
         'content_blocks',
+        'facebook_post_url',
         'created_by',
     ];
 

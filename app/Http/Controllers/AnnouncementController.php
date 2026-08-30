@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Announcement;
+use App\Jobs\SendAnnouncementToTelegramChannelJob;
+use App\Http\Requests\UpsertAnnouncementRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -45,10 +47,8 @@ class AnnouncementController extends Controller
         $isManager = $request->boolean('manage') && $request->user('sanctum')?->can('create announcements');
 
         if (!$isManager) {
-            $query->where(function ($q) {
-                $q->whereNull('published_at')
-                  ->orWhere('published_at', '<=', now());
-            });
+            $query->whereNotNull('published_at')
+                ->where('published_at', '<=', now());
         }
 
         $announcements = $query
@@ -67,7 +67,7 @@ class AnnouncementController extends Controller
         $isManager = $request->boolean('manage') && $request->user('sanctum')?->can('create announcements');
 
         if (!$isManager) {
-            if ($announcement->published_at && $announcement->published_at > now()) {
+            if (!$announcement->published_at || $announcement->published_at > now()) {
                 abort(404, 'Aviso no encontrado o no disponible aún.');
             }
         }
@@ -83,9 +83,9 @@ class AnnouncementController extends Controller
      * POST /announcements
      * Creates a new announcement. Accepts multipart/form-data for file uploads.
      */
-    public function store(Request $request): JsonResponse
+    public function store(UpsertAnnouncementRequest $request): JsonResponse
     {
-        $validated = $this->validatePayload($request);
+        $validated = $request->validatedPayload();
 
         // Handle file upload
         if ($request->hasFile('media_file')) {
@@ -100,10 +100,12 @@ class AnnouncementController extends Controller
             $validated['slug'] = $this->uniqueSlug($validated['title']);
         }
 
-        // Published at fallback
-        if (empty($validated['published_at'])) {
-            $validated['published_at'] = now();
-        }
+        $validated['published_at'] = $this->resolvePublishedAt($request, $validated['published_at'] ?? null);
+
+        // Legacy short content: mirror summary for older clients
+        $validated['content_type'] = 'text';
+        $validated['content_text'] = $validated['summary'] ?? null;
+        $validated['content_items'] = null;
 
         // Created by
         /** @var \App\Models\User|null $user */
@@ -114,6 +116,8 @@ class AnnouncementController extends Controller
 
         $announcement = Announcement::create($validated);
 
+        $this->maybeBroadcastToTelegram($announcement, $request);
+
         return response()->json($announcement, 201);
     }
 
@@ -121,9 +125,9 @@ class AnnouncementController extends Controller
      * PATCH /announcements/{announcement}
      * Updates an existing announcement. New file replaces old one.
      */
-    public function update(Request $request, Announcement $announcement): JsonResponse
+    public function update(UpsertAnnouncementRequest $request, Announcement $announcement): JsonResponse
     {
-        $validated = $this->validatePayload($request, $announcement->id);
+        $validated = $request->validatedPayload();
 
         // Handle new file upload
         if ($request->hasFile('media_file')) {
@@ -141,7 +145,23 @@ class AnnouncementController extends Controller
             $validated['slug'] = $this->uniqueSlug($validated['title'] ?? $announcement->title, $announcement->id);
         }
 
+        if ($request->has('publish_action')) {
+            $validated['published_at'] = $this->resolvePublishedAt(
+                $request,
+                $validated['published_at'] ?? $announcement->published_at?->toIso8601String()
+            );
+        }
+
+        if (array_key_exists('summary', $validated)) {
+            $validated['content_type'] = 'text';
+            $validated['content_text'] = $validated['summary'];
+            $validated['content_items'] = null;
+        }
+
         $announcement->update($validated);
+
+        $announcement->refresh();
+        $this->maybeBroadcastToTelegram($announcement, $request);
 
         return response()->json($announcement);
     }
@@ -165,45 +185,58 @@ class AnnouncementController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Shared validation rules for store and update.
-     * On update, the slug uniqueness rule ignores the current row.
+     * Resolves published_at from publish_action (draft | publish | schedule).
      */
-    private function validatePayload(Request $request, ?int $ignoreId = null): array
+    private function resolvePublishedAt(Request $request, ?string $publishedAt): ?\Illuminate\Support\Carbon
     {
-        $slugRule = ['nullable', 'string', 'max:255'];
-        $slugRule[] = $ignoreId
-            ? \Illuminate\Validation\Rule::unique('announcements', 'slug')->ignore($ignoreId)
-            : 'unique:announcements,slug';
+        $action = $request->input('publish_action', 'publish');
 
-        return $request->validate([
-            'title'                    => ['required', 'string', 'max:255'],
-            'header'                   => ['nullable', 'string', 'max:255'],
-            'slug'                     => $slugRule,
-            'header_alert_enabled'     => ['sometimes', 'boolean'],
-            'header_alert_label'       => ['nullable', 'string', 'max:255'],
-            'content_type'             => ['required', 'in:text,list'],
-            'content_text'             => ['nullable', 'string'],
-            'content_items'            => ['nullable', 'array'],
-            'content_items.*'          => ['string'],
-            'primary_button_label'     => ['nullable', 'string', 'max:255'],
-            'primary_button_href'      => ['nullable', 'string', 'max:1024'],
-            'primary_button_action'    => ['nullable', 'string', 'max:255'],
-            'secondary_button_enabled' => ['sometimes', 'boolean'],
-            'secondary_button_label'   => ['nullable', 'string', 'max:255'],
-            'secondary_button_href'    => ['nullable', 'string', 'max:1024'],
-            'media_type'               => ['required', 'in:image,video,youtube'],
-            'media_file'               => ['nullable', 'file', 'max:51200'], // 50 MB
-            'media_src'                => ['nullable', 'string', 'max:1024'],
-            'media_youtube_id'         => ['nullable', 'string', 'max:255'],
-            'media_alt'                => ['required', 'string', 'max:255'],
-            'media_ratio'              => ['required', 'in:4/3,3/4,4/4'],
-            'published_at'             => ['nullable', 'date'],
-            'author'                   => ['nullable', 'string', 'max:255'],
-            'type'                     => ['required', 'in:Informativo,Urgente,Recordatorio,Tarea,General'],
-            'important'                => ['sometimes', 'boolean'],
-            'summary'                  => ['nullable', 'string', 'max:500'],
-            'content_blocks'           => ['nullable', 'array'],
-        ]);
+        if ($action === 'draft') {
+            return null;
+        }
+
+        if ($action === 'schedule') {
+            if (empty($publishedAt)) {
+                abort(422, 'Indica fecha y hora para programar el aviso.');
+            }
+
+            return \Illuminate\Support\Carbon::parse($publishedAt);
+        }
+
+        // publish now
+        return now();
+    }
+
+    /**
+     * Queue a low-priority Telegram channel post when publishing or scheduling.
+     */
+    private function maybeBroadcastToTelegram(Announcement $announcement, Request $request): void
+    {
+        $action = $request->input('publish_action');
+        if (! in_array($action, ['publish', 'schedule'], true)) {
+            return;
+        }
+
+        $chatId = trim((string) config('telegram.announcements.chat_id', ''));
+        if ($chatId === '') {
+            Log::warning('Telegram broadcast skipped: TELEGRAM_ANNOUNCEMENTS_CHAT_ID empty', [
+                'announcement_id' => $announcement->id,
+            ]);
+
+            return;
+        }
+
+        if (! $announcement->published_at) {
+            return;
+        }
+
+        $pending = SendAnnouncementToTelegramChannelJob::dispatch($announcement->id);
+
+        if ($announcement->published_at->isFuture()) {
+            $pending->delay($announcement->published_at);
+        } else {
+            $pending->delay(now()->addSeconds(8));
+        }
     }
 
     /**

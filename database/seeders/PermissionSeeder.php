@@ -73,6 +73,12 @@ class PermissionSeeder extends Seeder
             'edit events',
             'delete events',
 
+            // Identity banners (home carousel)
+            'create identity banners',
+            'view identity banners',
+            'edit identity banners',
+            'delete identity banners',
+
             // Misc used by UI
             'manage settings',
             'view groups',
@@ -114,7 +120,7 @@ class PermissionSeeder extends Seeder
         }
 
         // Roles that already publish announcements manage the rest of the CMS
-        // (galleries and events) without a manual re-assignment.
+        // (galleries, events and identity banners) without a manual re-assignment.
         $contentRoles = Role::query()
             ->whereHas('permissions', fn ($query) => $query->where('name', 'create announcements'))
             ->get();
@@ -129,6 +135,10 @@ class PermissionSeeder extends Seeder
                 'view events',
                 'edit events',
                 'delete events',
+                'create identity banners',
+                'view identity banners',
+                'edit identity banners',
+                'delete identity banners',
             ]);
         }
 

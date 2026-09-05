@@ -15,6 +15,7 @@ use App\Http\Controllers\AttendanceSettingsController;
 use App\Http\Controllers\Auth\ChangePasswordController;
 use App\Http\Controllers\Content\EventController;
 use App\Http\Controllers\Content\GalleryController;
+use App\Http\Controllers\Content\IdentityBannerController;
 use App\Http\Controllers\Content\MediaUploadController;
 use App\Http\Controllers\EnrollmentPromotionController;
 use App\Http\Controllers\FirstGradeGroupAssignmentController;
@@ -266,11 +267,11 @@ Route::prefix('announcements')->group(function () {
 });
 
 /**
- * Content media (shared uploads for announcements, galleries and events)
+ * Content media (shared uploads for announcements, galleries, events, identity banners)
  * ___________________________________________________________________________
  */
 Route::prefix('content')
-    ->middleware(['auth:sanctum', 'verified', 'permission:create announcements|create galleries|create events'])
+    ->middleware(['auth:sanctum', 'verified', 'permission:create announcements|create galleries|create events|create identity banners'])
     ->group(function () {
         Route::post('/media', [MediaUploadController::class, 'store']);
     });
@@ -306,6 +307,21 @@ Route::prefix('events')->group(function () {
         Route::post('/', [EventController::class, 'store']);
         Route::patch('/{event}', [EventController::class, 'update']);
         Route::delete('/{event}', [EventController::class, 'destroy']);
+    });
+});
+
+/**
+ * Identity banners (home #identidad carousel)
+ * ___________________________________________________________________________
+ */
+Route::prefix('identity-banners')->group(function () {
+    Route::get('/', [IdentityBannerController::class, 'index']);
+    Route::get('/{identityBanner}', [IdentityBannerController::class, 'show']);
+
+    Route::middleware(['auth:sanctum', 'verified', 'permission:create identity banners'])->group(function () {
+        Route::post('/', [IdentityBannerController::class, 'store']);
+        Route::patch('/{identityBanner}', [IdentityBannerController::class, 'update']);
+        Route::delete('/{identityBanner}', [IdentityBannerController::class, 'destroy']);
     });
 });
 

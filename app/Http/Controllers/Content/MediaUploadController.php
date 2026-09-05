@@ -25,9 +25,13 @@ class MediaUploadController extends Controller
     {
         $collection = $request->collection();
 
+        $maxWidth = $collection === PublicMediaStorageService::IDENTITY_BANNERS_DIR
+            ? PublicMediaStorageService::IDENTITY_BANNER_MAX_WIDTH
+            : null;
+
         $uploaded = collect($request->file('files'))
-            ->map(function ($file) use ($collection): array {
-                $path = $this->media->storeImage($file, $collection);
+            ->map(function ($file) use ($collection, $maxWidth): array {
+                $path = $this->media->storeImage($file, $collection, $maxWidth);
 
                 return [
                     'path' => $path,

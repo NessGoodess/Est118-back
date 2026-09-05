@@ -28,3 +28,6 @@ database/seeders/test/
 app/Console/Commands/GenerateSeederFromCsv.php
 
 /storage
+
+/app/Console/Commands/ClearSessionCookies.php
+/scripts/

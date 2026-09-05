@@ -13,6 +13,7 @@ class StoreMediaUploadRequest extends FormRequest
         PublicMediaStorageService::ANNOUNCEMENTS_DIR,
         PublicMediaStorageService::GALLERIES_DIR,
         PublicMediaStorageService::EVENTS_DIR,
+        PublicMediaStorageService::IDENTITY_BANNERS_DIR,
     ];
 
     public function authorize(): bool

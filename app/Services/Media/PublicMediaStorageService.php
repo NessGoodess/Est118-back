@@ -10,7 +10,7 @@ use Intervention\Image\Drivers\Gd\Driver;
 use Intervention\Image\ImageManager;
 
 /**
- * Shared storage for publicly served media (announcements, galleries, events).
+ * Shared storage for publicly served media (announcements, galleries, events, identity banners).
  *
  * Images are re-encoded to WebP and downscaled; videos are stored untouched.
  * Store methods return the relative disk path; callers decide whether to
@@ -23,8 +23,11 @@ class PublicMediaStorageService
     public const ANNOUNCEMENTS_DIR = 'announcements';
     public const GALLERIES_DIR = 'galleries';
     public const EVENTS_DIR = 'events';
+    public const IDENTITY_BANNERS_DIR = 'identity-banners';
 
     private const IMG_MAX_WIDTH = 1280;
+
+    public const IDENTITY_BANNER_MAX_WIDTH = 2400;
 
     private const IMG_QUALITY = 82;
 

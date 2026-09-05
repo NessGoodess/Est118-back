@@ -5,31 +5,20 @@ namespace App\Http\Controllers;
 use App\Models\Announcement;
 use App\Jobs\SendAnnouncementToTelegramChannelJob;
 use App\Http\Requests\UpsertAnnouncementRequest;
+use App\Services\Media\PublicMediaStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Intervention\Image\ImageManager;
-use Intervention\Image\Drivers\Gd\Driver;
 
 class AnnouncementController extends Controller
 {
-    // ─────────────────────────────────────────────────────────────────────────
-    // Constants
-    // ─────────────────────────────────────────────────────────────────────────
-
     /** Directory inside public storage for announcement media */
-    private const MEDIA_DIR = 'announcements';
+    private const MEDIA_DIR = PublicMediaStorageService::ANNOUNCEMENTS_DIR;
 
-    /** Max width (px) for full-size optimized image */
-    private const IMG_MAX_WIDTH = 1280;
-
-    /** Max width (px) for thumbnail */
-    private const THUMB_MAX_WIDTH = 640;
-
-    /** JPEG/WebP quality (1–100) */
-    private const IMG_QUALITY = 82;
+    public function __construct(private readonly PublicMediaStorageService $media)
+    {
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Public routes (no auth required)
@@ -158,6 +147,13 @@ class AnnouncementController extends Controller
             $validated['content_items'] = null;
         }
 
+        if (array_key_exists('content_blocks', $validated)) {
+            $this->pruneContentBlockMedia(
+                $announcement->content_blocks,
+                $validated['content_blocks']
+            );
+        }
+
         $announcement->update($validated);
 
         $announcement->refresh();
@@ -172,8 +168,9 @@ class AnnouncementController extends Controller
      */
     public function destroy(Announcement $announcement): JsonResponse
     {
-        // Remove physical media file if locally stored
+        // Remove physical media files if locally stored
         $this->deleteMediaFile($announcement->media_src);
+        $this->media->deleteMany($this->contentBlockMediaSources($announcement->content_blocks));
 
         $announcement->delete();
 
@@ -240,67 +237,73 @@ class AnnouncementController extends Controller
     }
 
     /**
-     * Optimizes and stores an image upload.
-     * Saves the optimized WebP (or JPEG fallback) in public/announcements/.
-     * Returns the public URL stored in media_src.
+     * Optimizes and stores an image upload, returning the public URL kept in media_src.
      */
     private function storeImage(\Illuminate\Http\UploadedFile $file): string
     {
-        $manager = new ImageManager(new Driver());
-        $image   = $manager->read($file->getRealPath());
-
-        // Downscale if wider than max width while preserving ratio
-        if ($image->width() > self::IMG_MAX_WIDTH) {
-            $image->scaleDown(width: self::IMG_MAX_WIDTH);
-        }
-
-        $filename = Str::uuid() . '.webp';
-        $path     = self::MEDIA_DIR . '/' . $filename;
-
-        // Encode to WebP and store in public disk
-        Storage::disk('public')->put($path, $image->toWebp(self::IMG_QUALITY));
-
-        return Storage::disk('public')->url($path);
+        return $this->media->url($this->media->storeImage($file, self::MEDIA_DIR));
     }
 
     /**
-     * Stores a video upload directly (no transcoding — just move to disk).
-     * Returns the public URL.
+     * Stores a video upload as-is, returning the public URL kept in media_src.
      */
     private function storeVideo(\Illuminate\Http\UploadedFile $file): string
     {
-        $ext      = $file->getClientOriginalExtension() ?: 'mp4';
-        $filename = Str::uuid() . '.' . $ext;
-        $path     = self::MEDIA_DIR . '/' . $filename;
-
-        Storage::disk('public')->put($path, file_get_contents($file->getRealPath()));
-
-        return Storage::disk('public')->url($path);
+        return $this->media->url($this->media->storeVideo($file, self::MEDIA_DIR));
     }
 
     /**
-     * Deletes a locally stored media file from the public disk.
-     * Ignores external URLs (http/https) and null values.
+     * Deletes a locally stored media file. External links are ignored.
      */
     private function deleteMediaFile(?string $src): void
     {
-        if (!$src) return;
-        if (str_starts_with($src, 'http')) return; // YouTube or external link
+        $this->media->delete($src);
+    }
 
-        try {
-            // Convert public URL back to relative path
-            $publicUrl  = Storage::disk('public')->url('');
-            $relativePath = ltrim(str_replace($publicUrl, '', $src), '/');
+    /**
+     * Every image URL referenced by content blocks (image + gallery blocks).
+     *
+     * @param  array<int, array<string, mixed>>|null  $blocks
+     * @return array<int, string>
+     */
+    private function contentBlockMediaSources(?array $blocks): array
+    {
+        return collect($blocks ?? [])
+            ->flatMap(function (array $block): array {
+                $type = $block['type'] ?? null;
 
-            if ($relativePath && Storage::disk('public')->exists($relativePath)) {
-                Storage::disk('public')->delete($relativePath);
-            }
-        } catch (\Throwable $e) {
-            Log::warning('Could not delete announcement media file', [
-                'src'   => $src,
-                'error' => $e->getMessage(),
-            ]);
-        }
+                if ($type === 'image' || $type === 'video') {
+                    return [$block['src'] ?? null];
+                }
+
+                if ($type === 'gallery') {
+                    return collect($block['images'] ?? [])
+                        ->map(fn ($image) => is_array($image) ? ($image['src'] ?? null) : null)
+                        ->all();
+                }
+
+                return [];
+            })
+            ->filter(fn ($src) => is_string($src) && $src !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Removes files that were dropped from content blocks during an update.
+     *
+     * @param  array<int, array<string, mixed>>|null  $previous
+     * @param  array<int, array<string, mixed>>|null  $next
+     */
+    private function pruneContentBlockMedia(?array $previous, ?array $next): void
+    {
+        $orphans = array_diff(
+            $this->contentBlockMediaSources($previous),
+            $this->contentBlockMediaSources($next)
+        );
+
+        $this->media->deleteMany($orphans);
     }
 
     /**

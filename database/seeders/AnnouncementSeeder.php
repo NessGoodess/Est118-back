@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Announcement;
+use App\Models\Content\Gallery;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -11,6 +12,7 @@ class AnnouncementSeeder extends Seeder
 {
     /**
      * Purge announcements and seed six example publications (avisos + noticias).
+     * Cover photos are Unsplash stills of students, classrooms and school life.
      */
     public function run(): void
     {
@@ -23,6 +25,10 @@ class AnnouncementSeeder extends Seeder
         Schema::disableForeignKeyConstraints();
         DB::table('announcements')->truncate();
         Schema::enableForeignKeyConstraints();
+
+        $talleresGalleryId = Schema::hasTable('galleries')
+            ? Gallery::query()->where('slug', 'vida-en-los-talleres')->value('id')
+            : null;
 
         $samples = [
             [
@@ -43,8 +49,18 @@ class AnnouncementSeeder extends Seeder
                         'Seguir el Facebook institucional EscSecTecnica118.',
                     ]],
                     ['type' => 'paragraph', 'text' => 'Agradecemos la confianza de las familias y el esfuerzo del personal docente y administrativo.'],
+                    [
+                        'type' => 'gallery',
+                        'layout' => 'carousel',
+                        'title' => 'Regreso a clases',
+                        'images' => [
+                            $this->blockImage('photo-1509062522246-3755977927d7', 'Grupo de estudiantes en el aula el primer día'),
+                            $this->blockImage('photo-1524178232363-1fb2b075b655', 'Estudiantes reunidos en el aula magna'),
+                            $this->blockImage('photo-1503676260728-1c00da094a0b', 'Estudiantes leyendo en el aula'),
+                        ],
+                    ],
                 ],
-                'media_src' => 'https://picsum.photos/seed/est118-welcome/1280/960',
+                'media_src' => $this->unsplash('photo-1524178232363-1fb2b075b655'),
                 'days_ago' => 1,
             ],
             [
@@ -65,7 +81,7 @@ class AnnouncementSeeder extends Seeder
                         'Llevar identificación y folio de preinscripción si aplica.',
                     ]],
                 ],
-                'media_src' => 'https://picsum.photos/seed/est118-meeting/1280/960',
+                'media_src' => $this->unsplash('photo-1503676260728-1c00da094a0b'),
                 'secondary_button_enabled' => true,
                 'secondary_button_label' => 'Ver ubicación',
                 'secondary_button_href' => '/#ubicacion',
@@ -87,7 +103,7 @@ class AnnouncementSeeder extends Seeder
                         'Entrega de resultados: según el cronograma de cada grado.',
                     ]],
                 ],
-                'media_src' => 'https://picsum.photos/seed/est118-calendar/1280/960',
+                'media_src' => $this->unsplash('photo-1434030216411-0b793f4b4173'),
                 'days_ago' => 4,
             ],
             [
@@ -104,7 +120,7 @@ class AnnouncementSeeder extends Seeder
                     ['type' => 'paragraph', 'text' => 'El personal administrativo atenderá solo trámites urgentes en contraloría. Las clases se reanudarán al día siguiente en horario habitual.'],
                     ['type' => 'paragraph', 'text' => 'Agradecemos su comprensión y pedimos difundir este aviso entre las familias.'],
                 ],
-                'media_src' => 'https://picsum.photos/seed/est118-urgent/1280/960',
+                'media_src' => $this->unsplash('photo-1562774053-701939374585'),
                 'days_ago' => 0,
             ],
             [
@@ -123,11 +139,27 @@ class AnnouncementSeeder extends Seeder
                         'Confección del vestido e industria textil.',
                         'Máquinas, herramientas y sistemas de control.',
                     ]],
-                    ['type' => 'youtube', 'youtubeId' => 'dQw4w9WgXcQ', 'caption' => 'Video de muestra (reemplazar por el oficial)'],
+                    [
+                        'type' => 'gallery',
+                        'layout' => 'carousel',
+                        'title' => 'Así se vive la feria',
+                        'images' => [
+                            $this->blockImage('photo-1532094349884-543bc11b234d', 'Estudiantes en un laboratorio de ciencias'),
+                            $this->blockImage('photo-1581091226825-a6a2a5aee158', 'Estudiantes en el taller de informática'),
+                            $this->blockImage('photo-1504148455328-c376907d081c', 'Banco de trabajo del taller de máquinas'),
+                            $this->blockImage('photo-1558618666-fcd25c85cd64', 'Práctica de confección del vestido'),
+                            $this->blockImage('photo-1452860606245-08befc0ff44b', 'Mesa de diseño industrial'),
+                            $this->blockImage('photo-1427504494785-3a9ca7044f45', 'Sala de cómputo durante la muestra'),
+                        ],
+                    ],
+                    ...($talleresGalleryId ? [[
+                        'type' => 'gallery_ref',
+                        'galleryId' => $talleresGalleryId,
+                        'layout' => 'grid',
+                        'title' => 'Álbum de talleres',
+                    ]] : []),
                 ],
-                'media_type' => 'youtube',
-                'media_youtube_id' => 'dQw4w9WgXcQ',
-                'media_src' => null,
+                'media_src' => $this->unsplash('photo-1532094349884-543bc11b234d'),
                 'days_ago' => 6,
             ],
             [
@@ -146,14 +178,12 @@ class AnnouncementSeeder extends Seeder
                         'Verificar que los datos de la credencial sean correctos al recibirla.',
                     ]],
                 ],
-                'media_src' => 'https://picsum.photos/seed/est118-id/1280/960',
+                'media_src' => $this->unsplash('photo-1580582932707-520aed937b7b'),
                 'days_ago' => 8,
             ],
         ];
 
         foreach ($samples as $sample) {
-            $mediaType = $sample['media_type'] ?? 'image';
-
             Announcement::create([
                 'slug' => $sample['slug'],
                 'header' => $sample['header'],
@@ -166,9 +196,9 @@ class AnnouncementSeeder extends Seeder
                 'secondary_button_enabled' => $sample['secondary_button_enabled'] ?? false,
                 'secondary_button_label' => $sample['secondary_button_label'] ?? null,
                 'secondary_button_href' => $sample['secondary_button_href'] ?? null,
-                'media_type' => $mediaType,
+                'media_type' => 'image',
                 'media_src' => $sample['media_src'] ?? null,
-                'media_youtube_id' => $sample['media_youtube_id'] ?? null,
+                'media_youtube_id' => null,
                 'media_alt' => $sample['title'],
                 'media_ratio' => '4/3',
                 'published_at' => now()->subDays($sample['days_ago']),
@@ -181,6 +211,23 @@ class AnnouncementSeeder extends Seeder
             ]);
         }
 
-        $this->command?->info('Anouncements limpiados y 6 publicaciones de ejemplo sembradas.');
+        $this->command?->info('Avisos limpiados y 6 publicaciones de ejemplo sembradas.');
+    }
+
+    /**
+     * @return array{src: string, alt: string, caption: string}
+     */
+    private function blockImage(string $id, string $alt): array
+    {
+        return [
+            'src' => $this->unsplash($id),
+            'alt' => $alt,
+            'caption' => $alt,
+        ];
+    }
+
+    private function unsplash(string $id): string
+    {
+        return "https://images.unsplash.com/{$id}?auto=format&fit=crop&w=1280&h=960&q=80";
     }
 }

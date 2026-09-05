@@ -61,6 +61,18 @@ class PermissionSeeder extends Seeder
             'edit announcements',
             'delete announcements',
 
+            // Galleries (photo albums)
+            'create galleries',
+            'view galleries',
+            'edit galleries',
+            'delete galleries',
+
+            // Events
+            'create events',
+            'view events',
+            'edit events',
+            'delete events',
+
             // Misc used by UI
             'manage settings',
             'view groups',
@@ -98,6 +110,25 @@ class PermissionSeeder extends Seeder
                 'delete pre-enrollments',
                 'view admission enrollment',
                 'edit admission enrollment',
+            ]);
+        }
+
+        // Roles that already publish announcements manage the rest of the CMS
+        // (galleries and events) without a manual re-assignment.
+        $contentRoles = Role::query()
+            ->whereHas('permissions', fn ($query) => $query->where('name', 'create announcements'))
+            ->get();
+
+        foreach ($contentRoles as $role) {
+            $role->givePermissionTo([
+                'create galleries',
+                'view galleries',
+                'edit galleries',
+                'delete galleries',
+                'create events',
+                'view events',
+                'edit events',
+                'delete events',
             ]);
         }
 

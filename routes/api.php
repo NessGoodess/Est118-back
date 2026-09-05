@@ -13,6 +13,9 @@ use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AttendanceSettingsController;
 use App\Http\Controllers\Auth\ChangePasswordController;
+use App\Http\Controllers\Content\EventController;
+use App\Http\Controllers\Content\GalleryController;
+use App\Http\Controllers\Content\MediaUploadController;
 use App\Http\Controllers\EnrollmentPromotionController;
 use App\Http\Controllers\FirstGradeGroupAssignmentController;
 use App\Http\Controllers\GeneralAttendanceController;
@@ -128,14 +131,6 @@ Route::prefix('attendance')->middleware(['auth:sanctum', 'verified'])->group(fun
 Route::post('/telegram/webhook', [TelegramController::class, 'webhook']);
 
 Route::get('/schedules', [ScheduleController::class, 'index']);
-
-Route::get('/debug-telegram-config', function () {
-    return [
-        'env_token' => env('TELEGRAM_BOT_TOKEN'),
-        'config_token' => config('telegram.bots.mybot.token'),
-        'default_bot' => config('telegram.default'),
-    ];
-});
 
 /**
  * Admission Settings Routes
@@ -267,6 +262,50 @@ Route::prefix('announcements')->group(function () {
         Route::post('/', [AnnouncementController::class, 'store']);
         Route::patch('/{announcement}', [AnnouncementController::class, 'update']);
         Route::delete('/{announcement}', [AnnouncementController::class, 'destroy']);
+    });
+});
+
+/**
+ * Content media (shared uploads for announcements, galleries and events)
+ * ___________________________________________________________________________
+ */
+Route::prefix('content')
+    ->middleware(['auth:sanctum', 'verified', 'permission:create announcements|create galleries|create events'])
+    ->group(function () {
+        Route::post('/media', [MediaUploadController::class, 'store']);
+    });
+
+/**
+ * Galleries (photo albums)
+ * ___________________________________________________________________________
+ */
+Route::prefix('galleries')->group(function () {
+    // Public endpoints
+    Route::get('/', [GalleryController::class, 'index']);
+    Route::get('/{gallery}', [GalleryController::class, 'show']);
+
+    // Management endpoints (authenticated + permission)
+    Route::middleware(['auth:sanctum', 'verified', 'permission:create galleries'])->group(function () {
+        Route::post('/', [GalleryController::class, 'store']);
+        Route::patch('/{gallery}', [GalleryController::class, 'update']);
+        Route::delete('/{gallery}', [GalleryController::class, 'destroy']);
+    });
+});
+
+/**
+ * Events (school calendar + /eventos)
+ * ___________________________________________________________________________
+ */
+Route::prefix('events')->group(function () {
+    // Public endpoints
+    Route::get('/', [EventController::class, 'index']);
+    Route::get('/{event}', [EventController::class, 'show']);
+
+    // Management endpoints (authenticated + permission)
+    Route::middleware(['auth:sanctum', 'verified', 'permission:create events'])->group(function () {
+        Route::post('/', [EventController::class, 'store']);
+        Route::patch('/{event}', [EventController::class, 'update']);
+        Route::delete('/{event}', [EventController::class, 'destroy']);
     });
 });
 

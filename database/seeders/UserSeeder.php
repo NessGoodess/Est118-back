@@ -21,10 +21,10 @@ class UserSeeder extends Seeder
     private function createDefaultAdminUser(): void
     {
         $admin = User::firstOrCreate(
-            ['email' => 'admin@est118.edu.mx'],
+            ['email' => 'admin@example.com'],
             [
                 'name' => 'Administrador General',
-                'password' => Hash::make('Admin123!'),
+                'password' => Hash::make('password'),
                 'email_verified_at' => now(),
             ]
         );
@@ -35,7 +35,7 @@ class UserSeeder extends Seeder
         }
 
         $this->command->info('User created');
-        $this->command->info('Admin user: admin@est118.edu.mx');
-        $this->command->info('Password: Admin123!');
+        $this->command->info('Admin user: admin@example.com');
+        $this->command->info('Password: password');
     }
 }

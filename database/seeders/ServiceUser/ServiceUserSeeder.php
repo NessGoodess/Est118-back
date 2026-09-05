@@ -16,14 +16,14 @@ class ServiceUserSeeder extends Seeder
     {
          User::firstOrCreate(
             [
-                'email' => 'nfc-service@est118.edu.mx',
+                'email' => 'nfc-service@example.com',
             ],
             [
-                'name' => 'NFC Service',
+                'name' => 'Service User',
                 'password' => bcrypt(Str::random(40)), // Never used
                 'email_verified_at' => now(),
             ]
         );
-    
+    $this->command->info('Service user created');
     }
 }

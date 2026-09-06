@@ -83,7 +83,7 @@ class EventController extends Controller
 
     public function store(UpsertEventRequest $request): JsonResponse
     {
-        $validated = $request->validated();
+        $validated = $this->normalizeMediaFields($request->validated());
 
         $validated['slug'] = $this->uniqueSlug($validated['slug'] ?? '' ?: $validated['title']);
         $validated['published_at'] = $this->resolvePublishedAt($request, $validated['published_at'] ?? null);
@@ -96,7 +96,7 @@ class EventController extends Controller
 
     public function update(UpsertEventRequest $request, Event $event): JsonResponse
     {
-        $validated = $request->validated();
+        $validated = $this->normalizeMediaFields($request->validated());
 
         $validated['slug'] = $this->uniqueSlug(
             $validated['slug'] ?? '' ?: ($validated['title'] ?? $event->title),
@@ -174,12 +174,33 @@ class EventController extends Controller
      */
     private function pruneContentBlockMedia(?array $previous, ?array $next): void
     {
-        $orphans = array_diff(
-            $this->contentBlockMediaSources($previous),
-            $this->contentBlockMediaSources($next)
-        );
+        $previousKeys = collect($this->contentBlockMediaSources($previous))
+            ->map(fn (string $src) => $this->media->storedKey($src))
+            ->filter()
+            ->all();
+        $nextKeys = collect($this->contentBlockMediaSources($next))
+            ->map(fn (string $src) => $this->media->storedKey($src))
+            ->filter()
+            ->all();
 
-        $this->media->deleteMany($orphans);
+        $this->media->deleteMany(array_diff($previousKeys, $nextKeys));
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeMediaFields(array $validated): array
+    {
+        if (array_key_exists('cover_src', $validated)) {
+            $validated['cover_src'] = $this->media->toStoredSrc($validated['cover_src']);
+        }
+
+        if (array_key_exists('content_blocks', $validated)) {
+            $validated['content_blocks'] = $this->media->normalizeContentBlocks($validated['content_blocks']);
+        }
+
+        return $validated;
     }
 
     private function resolvePublishedAt(Request $request, ?string $publishedAt): ?Carbon

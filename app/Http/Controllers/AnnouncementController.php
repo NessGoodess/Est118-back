@@ -75,6 +75,7 @@ class AnnouncementController extends Controller
     public function store(UpsertAnnouncementRequest $request): JsonResponse
     {
         $validated = $request->validatedPayload();
+        $validated = $this->normalizeMediaFields($validated);
 
         // Handle file upload
         if ($request->hasFile('media_file')) {
@@ -117,6 +118,7 @@ class AnnouncementController extends Controller
     public function update(UpsertAnnouncementRequest $request, Announcement $announcement): JsonResponse
     {
         $validated = $request->validatedPayload();
+        $validated = $this->normalizeMediaFields($validated);
 
         // Handle new file upload
         if ($request->hasFile('media_file')) {
@@ -241,7 +243,7 @@ class AnnouncementController extends Controller
      */
     private function storeImage(\Illuminate\Http\UploadedFile $file): string
     {
-        return $this->media->url($this->media->storeImage($file, self::MEDIA_DIR));
+        return $this->media->publicPath($this->media->storeImage($file, self::MEDIA_DIR));
     }
 
     /**
@@ -249,7 +251,7 @@ class AnnouncementController extends Controller
      */
     private function storeVideo(\Illuminate\Http\UploadedFile $file): string
     {
-        return $this->media->url($this->media->storeVideo($file, self::MEDIA_DIR));
+        return $this->media->publicPath($this->media->storeVideo($file, self::MEDIA_DIR));
     }
 
     /**
@@ -298,12 +300,33 @@ class AnnouncementController extends Controller
      */
     private function pruneContentBlockMedia(?array $previous, ?array $next): void
     {
-        $orphans = array_diff(
-            $this->contentBlockMediaSources($previous),
-            $this->contentBlockMediaSources($next)
-        );
+        $previousKeys = collect($this->contentBlockMediaSources($previous))
+            ->map(fn (string $src) => $this->media->storedKey($src))
+            ->filter()
+            ->all();
+        $nextKeys = collect($this->contentBlockMediaSources($next))
+            ->map(fn (string $src) => $this->media->storedKey($src))
+            ->filter()
+            ->all();
 
-        $this->media->deleteMany($orphans);
+        $this->media->deleteMany(array_diff($previousKeys, $nextKeys));
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeMediaFields(array $validated): array
+    {
+        if (array_key_exists('media_src', $validated)) {
+            $validated['media_src'] = $this->media->toStoredSrc($validated['media_src']);
+        }
+
+        if (array_key_exists('content_blocks', $validated)) {
+            $validated['content_blocks'] = $this->media->normalizeContentBlocks($validated['content_blocks']);
+        }
+
+        return $validated;
     }
 
     /**

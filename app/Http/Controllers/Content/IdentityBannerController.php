@@ -59,6 +59,9 @@ class IdentityBannerController extends Controller
     public function store(UpsertIdentityBannerRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        if (isset($validated['src'])) {
+            $validated['src'] = $this->media->toStoredSrc($validated['src']) ?? $validated['src'];
+        }
 
         $validated['slug'] = $this->uniqueSlug(
             $validated['slug'] ?? '' ?: ($validated['title'] ?? $validated['alt'] ?? 'banner')
@@ -88,6 +91,9 @@ class IdentityBannerController extends Controller
     public function update(UpsertIdentityBannerRequest $request, IdentityBanner $identityBanner): JsonResponse
     {
         $validated = $request->validated();
+        if (isset($validated['src'])) {
+            $validated['src'] = $this->media->toStoredSrc($validated['src']) ?? $validated['src'];
+        }
 
         $validated['slug'] = $this->uniqueSlug(
             $validated['slug'] ?? '' ?: ($validated['title'] ?? $validated['alt'] ?? $identityBanner->slug),
@@ -125,7 +131,7 @@ class IdentityBannerController extends Controller
 
         if (
             array_key_exists('src', $validated)
-            && $validated['src'] !== $previousSrc
+            && ! $this->media->sameStoredFile($validated['src'], $previousSrc)
         ) {
             $this->media->delete($previousSrc);
         }

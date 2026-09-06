@@ -84,7 +84,7 @@ class GalleryController extends Controller
      */
     public function store(UpsertGalleryRequest $request): JsonResponse
     {
-        $validated = $request->validated();
+        $validated = $this->normalizeMediaFields($request->validated());
         $items = $validated['items'];
         unset($validated['items']);
 
@@ -103,7 +103,7 @@ class GalleryController extends Controller
      */
     public function update(UpsertGalleryRequest $request, Gallery $gallery): JsonResponse
     {
-        $validated = $request->validated();
+        $validated = $this->normalizeMediaFields($request->validated());
         $items = $validated['items'];
         unset($validated['items']);
 
@@ -176,17 +176,22 @@ class GalleryController extends Controller
      */
     private function syncItems(Gallery $gallery, array $items): void
     {
-        $keep = collect($items)->pluck('media_src')->filter()->unique();
+        $keep = collect($items)
+            ->pluck('media_src')
+            ->map(fn ($src) => $this->media->storedKey(is_string($src) ? $src : null))
+            ->filter()
+            ->unique();
 
         $removed = GalleryItem::where('gallery_id', $gallery->id)
-            ->whereNotIn('media_src', $keep)
+            ->get()
+            ->filter(fn (GalleryItem $item) => ! $keep->contains($this->media->storedKey($item->media_src)))
             ->pluck('media_src');
 
         GalleryItem::where('gallery_id', $gallery->id)->delete();
 
         $gallery->items()->createMany(
             collect($items)->values()->map(fn (array $item, int $index): array => [
-                'media_src' => $item['media_src'],
+                'media_src' => $this->media->toStoredSrc($item['media_src']) ?? $item['media_src'],
                 'alt' => $item['alt'],
                 'caption' => $item['caption'] ?? null,
                 'ratio' => $item['ratio'] ?? '4/3',
@@ -203,6 +208,29 @@ class GalleryController extends Controller
         $fresh->setAttribute('cover_src', $fresh->resolvedCover());
 
         return $fresh;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeMediaFields(array $validated): array
+    {
+        if (array_key_exists('cover_src', $validated)) {
+            $validated['cover_src'] = $this->media->toStoredSrc($validated['cover_src']);
+        }
+
+        if (isset($validated['items']) && is_array($validated['items'])) {
+            $validated['items'] = array_map(function (array $item): array {
+                if (isset($item['media_src']) && is_string($item['media_src'])) {
+                    $item['media_src'] = $this->media->toStoredSrc($item['media_src']) ?? $item['media_src'];
+                }
+
+                return $item;
+            }, $validated['items']);
+        }
+
+        return $validated;
     }
 
     /**

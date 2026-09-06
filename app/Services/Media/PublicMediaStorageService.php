@@ -76,11 +76,87 @@ class PublicMediaStorageService
     }
 
     /**
-     * Absolute public URL for a relative disk path.
+     * Host-agnostic public path for a relative disk path.
+     */
+    public function publicPath(string $path): string
+    {
+        return '/storage/'.ltrim($this->relativePath($path) ?? $path, '/');
+    }
+
+    /**
+     * Absolute public URL for a relative disk path (current APP_URL).
+     * Prefer publicPath() when persisting; use this only for outbound links.
      */
     public function url(string $path): string
     {
-        return Storage::disk(self::DISK)->url($path);
+        return rtrim((string) config('app.url'), '/').$this->publicPath($path);
+    }
+
+    /**
+     * Persistable src: /storage/... for our files, unchanged for external URLs.
+     */
+    public function toStoredSrc(?string $src): ?string
+    {
+        $value = trim((string) $src);
+        if ($value === '') {
+            return null;
+        }
+
+        $path = $this->relativePath($value);
+
+        return $path ? $this->publicPath($path) : $value;
+    }
+
+    /**
+     * Stable key for comparing the same file across absolute/relative srcs.
+     */
+    public function storedKey(?string $src): ?string
+    {
+        $value = trim((string) $src);
+        if ($value === '') {
+            return null;
+        }
+
+        return $this->relativePath($value) ?: $value;
+    }
+
+    public function sameStoredFile(?string $a, ?string $b): bool
+    {
+        $left = $this->storedKey($a);
+        $right = $this->storedKey($b);
+
+        return $left !== null && $left === $right;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>|null  $blocks
+     * @return array<int, array<string, mixed>>|null
+     */
+    public function normalizeContentBlocks(?array $blocks): ?array
+    {
+        if ($blocks === null) {
+            return null;
+        }
+
+        return array_map(function (array $block): array {
+            $type = $block['type'] ?? null;
+
+            if (($type === 'image' || $type === 'video') && isset($block['src']) && is_string($block['src'])) {
+                $block['src'] = $this->toStoredSrc($block['src']) ?? $block['src'];
+            }
+
+            if ($type === 'gallery' && isset($block['images']) && is_array($block['images'])) {
+                $block['images'] = array_map(function ($image) {
+                    if (is_array($image) && isset($image['src']) && is_string($image['src'])) {
+                        $image['src'] = $this->toStoredSrc($image['src']) ?? $image['src'];
+                    }
+
+                    return $image;
+                }, $block['images']);
+            }
+
+            return $block;
+        }, $blocks);
     }
 
     /**
@@ -95,7 +171,12 @@ class PublicMediaStorageService
         }
 
         if (! str_starts_with($value, 'http')) {
-            return ltrim($value, '/');
+            $path = ltrim($value, '/');
+            if (str_starts_with($path, 'storage/')) {
+                return ltrim(Str::after($path, 'storage/'), '/');
+            }
+
+            return $path;
         }
 
         $base = Storage::disk(self::DISK)->url('');
@@ -103,7 +184,6 @@ class PublicMediaStorageService
             return ltrim(Str::after($value, $base), '/');
         }
 
-        // Fall back to the conventional /storage/ prefix (symlinked public disk).
         $path = (string) parse_url($value, PHP_URL_PATH);
         if ($path !== '' && str_contains($path, '/storage/')) {
             return ltrim(Str::after($path, '/storage/'), '/');

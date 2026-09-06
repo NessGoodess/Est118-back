@@ -126,7 +126,7 @@ class LegalDocumentController extends Controller
         $document->updated_by = $request->user()?->id;
 
         if (array_key_exists('src', $validated) && filled($validated['src'])) {
-            $document->src = $validated['src'];
+            $document->src = $this->media->toStoredSrc($validated['src']) ?? $validated['src'];
         }
 
         if ($request->has('publish_action')) {
@@ -141,7 +141,7 @@ class LegalDocumentController extends Controller
         if (
             filled($previousSrc)
             && filled($document->src)
-            && $document->src !== $previousSrc
+            && ! $this->media->sameStoredFile($document->src, $previousSrc)
         ) {
             $this->media->delete($previousSrc);
         }

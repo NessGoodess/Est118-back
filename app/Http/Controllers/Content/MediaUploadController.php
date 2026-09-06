@@ -36,7 +36,7 @@ class MediaUploadController extends Controller
 
                 return [
                     'path' => $path,
-                    'src' => $this->media->url($path),
+                    'src' => $this->media->publicPath($path),
                     'name' => $file->getClientOriginalName(),
                 ];
             })
@@ -56,7 +56,7 @@ class MediaUploadController extends Controller
 
         return response()->json([
             'path' => $path,
-            'src' => $this->media->url($path),
+            'src' => $this->media->publicPath($path),
             'name' => $file->getClientOriginalName(),
         ], 201);
     }

@@ -24,6 +24,7 @@ class PublicMediaStorageService
     public const GALLERIES_DIR = 'galleries';
     public const EVENTS_DIR = 'events';
     public const IDENTITY_BANNERS_DIR = 'identity-banners';
+    public const LEGAL_DOCUMENTS_DIR = 'legal-documents';
 
     private const IMG_MAX_WIDTH = 1280;
 
@@ -46,6 +47,17 @@ class PublicMediaStorageService
 
         $path = $this->buildPath($directory, 'webp');
         Storage::disk(self::DISK)->put($path, $image->toWebp(self::IMG_QUALITY));
+
+        return $path;
+    }
+
+    /**
+     * Stores a PDF as-is and returns its relative disk path.
+     */
+    public function storePdf(UploadedFile $file, string $directory): string
+    {
+        $path = $this->buildPath($directory, 'pdf');
+        Storage::disk(self::DISK)->put($path, file_get_contents($file->getRealPath()));
 
         return $path;
     }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Content;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Content\StoreLegalPdfUploadRequest;
 use App\Http\Requests\Content\StoreMediaUploadRequest;
 use App\Services\Media\PublicMediaStorageService;
 use Illuminate\Http\JsonResponse;
@@ -42,5 +43,21 @@ class MediaUploadController extends Controller
             ->values();
 
         return response()->json(['files' => $uploaded], 201);
+    }
+
+    /**
+     * POST /api/content/pdf
+     * Stores a single PDF for legal documents.
+     */
+    public function storePdf(StoreLegalPdfUploadRequest $request): JsonResponse
+    {
+        $file = $request->file('file');
+        $path = $this->media->storePdf($file, PublicMediaStorageService::LEGAL_DOCUMENTS_DIR);
+
+        return response()->json([
+            'path' => $path,
+            'src' => $this->media->url($path),
+            'name' => $file->getClientOriginalName(),
+        ], 201);
     }
 }

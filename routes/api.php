@@ -16,6 +16,7 @@ use App\Http\Controllers\Auth\ChangePasswordController;
 use App\Http\Controllers\Content\EventController;
 use App\Http\Controllers\Content\GalleryController;
 use App\Http\Controllers\Content\IdentityBannerController;
+use App\Http\Controllers\Content\LegalDocumentController;
 use App\Http\Controllers\Content\MediaUploadController;
 use App\Http\Controllers\EnrollmentPromotionController;
 use App\Http\Controllers\FirstGradeGroupAssignmentController;
@@ -271,9 +272,11 @@ Route::prefix('announcements')->group(function () {
  * ___________________________________________________________________________
  */
 Route::prefix('content')
-    ->middleware(['auth:sanctum', 'verified', 'permission:create announcements|create galleries|create events|create identity banners'])
+    ->middleware(['auth:sanctum', 'verified', 'permission:create announcements|create galleries|create events|create identity banners|create legal documents'])
     ->group(function () {
         Route::post('/media', [MediaUploadController::class, 'store']);
+        Route::post('/pdf', [MediaUploadController::class, 'storePdf'])
+            ->middleware('permission:create legal documents');
     });
 
 /**
@@ -322,6 +325,21 @@ Route::prefix('identity-banners')->group(function () {
         Route::post('/', [IdentityBannerController::class, 'store']);
         Route::patch('/{identityBanner}', [IdentityBannerController::class, 'update']);
         Route::delete('/{identityBanner}', [IdentityBannerController::class, 'destroy']);
+    });
+});
+
+/**
+ * Legal documents (privacy, school rules, internal student-photos notice)
+ * ___________________________________________________________________________
+ */
+Route::prefix('legal-documents')->group(function () {
+    Route::get('/', [LegalDocumentController::class, 'index']);
+    Route::get('/{type}/file', [LegalDocumentController::class, 'file'])
+        ->middleware('throttle:5,1');
+    Route::get('/{type}', [LegalDocumentController::class, 'show']);
+
+    Route::middleware(['auth:sanctum', 'verified', 'permission:create legal documents'])->group(function () {
+        Route::put('/{type}', [LegalDocumentController::class, 'upsert']);
     });
 });
 

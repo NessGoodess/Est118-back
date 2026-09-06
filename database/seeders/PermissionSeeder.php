@@ -79,20 +79,27 @@ class PermissionSeeder extends Seeder
             'edit identity banners',
             'delete identity banners',
 
+            // Legal PDFs (privacy, school rules, internal photos notice)
+            'create legal documents',
+            'view legal documents',
+            'edit legal documents',
+            'delete legal documents',
+
             // Misc used by UI
             'manage settings',
             'view groups',
-            'create profile',
         ];
 
         foreach ($permissions as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
 
-        // Legacy name from older seeds — keep API on manage nfc readings
-        $legacy = Permission::where('name', 'manage general attendance')->first();
-        if ($legacy) {
-            $legacy->delete();
+        // Legacy names from older seeds
+        foreach (['manage general attendance', 'create profile'] as $legacyName) {
+            $legacy = Permission::where('name', $legacyName)->first();
+            if ($legacy) {
+                $legacy->delete();
+            }
         }
 
         $adminRole = Role::findOrCreate('admin', 'web');
@@ -139,6 +146,10 @@ class PermissionSeeder extends Seeder
                 'view identity banners',
                 'edit identity banners',
                 'delete identity banners',
+                'create legal documents',
+                'view legal documents',
+                'edit legal documents',
+                'delete legal documents',
             ]);
         }
 

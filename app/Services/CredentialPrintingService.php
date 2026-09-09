@@ -3,15 +3,32 @@
 namespace App\Services;
 
 use App\Enums\EnrollmentStatus;
+use App\Models\AcademicYear;
 use App\Models\Address;
 use App\Models\ClassGroup;
 use App\Models\Enrollment;
 use App\Models\Student;
-use App\Models\StudentCredentialTracking;
+use Carbon\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class CredentialPrintingService
 {
+    private const EMPTY_TRACKING = [
+        'credential_printed' => false,
+        'nfc_ready' => false,
+        'ready_to_deliver' => false,
+        'paid' => false,
+        'delivered' => false,
+        'lost' => false,
+        'replacement_count' => 0,
+    ];
+
+    public function __construct(
+        private readonly StudentPhotoPathService $photoPaths
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -48,37 +65,20 @@ class CredentialPrintingService
     }
 
     /**
-     * Filas para UI / JSON y exportación.
-     *
      * @return array{meta: array<string, mixed>, rows: array<int, array<string, mixed>>}
      */
     public function rowsForClassGroup(ClassGroup $classGroup): array
     {
         $classGroup->loadMissing(['gradeLevel', 'academicYear']);
-
-        $enrollments = Enrollment::query()
-            ->where('class_group_id', $classGroup->id)
-            ->where('status', EnrollmentStatus::Active)
-            ->with([
-                'student.profile.address',
-                'student.guardians.profile',
-                'student.credentialTrackings' => function ($q) use ($classGroup) {
-                    $q->where('academic_year_id', $classGroup->academic_year_id);
-                },
-                'student.workshops' => function ($q) use ($classGroup) {
-                    $q->wherePivot('academic_year_id', $classGroup->academic_year_id);
-                },
-            ])
-            ->orderBy('id')
-            ->get();
+        $canSeePhotos = $this->viewerCanSeePhotos();
 
         $rows = [];
-        foreach ($enrollments as $enrollment) {
+        foreach ($this->activeEnrollments($classGroup) as $enrollment) {
             $student = $enrollment->student;
             if (! $student || ! $student->profile) {
                 continue;
             }
-            $rows[] = $this->buildRow($student, $classGroup);
+            $rows[] = $this->buildRow($student, $classGroup, $canSeePhotos);
         }
 
         return [
@@ -96,8 +96,9 @@ class CredentialPrintingService
     /**
      * @return array<string, mixed>
      */
-    public function buildRow(Student $student, ClassGroup $classGroup): array
+    public function buildRow(Student $student, ClassGroup $classGroup, ?bool $canSeePhotos = null): array
     {
+        $canSeePhotos ??= $this->viewerCanSeePhotos();
         $profile = $student->profile;
         $grade = $classGroup->gradeLevel?->name ?? '';
         $group = $classGroup->name;
@@ -114,34 +115,27 @@ class CredentialPrintingService
         $tutorName = $gProfile
             ? trim(($gProfile->first_name ?? '').' '.($gProfile->last_name ?? ''))
             : '';
-        $tutorPhone = $gProfile?->phone_number;
-        $phone = $tutorPhone ?: ($profile->phone_number ?? '');
+        $phone = $gProfile?->phone_number ?: ($profile->phone_number ?? '');
 
-        $photoFilename = $profile->profile_picture;
-        $hasPhoto = (bool) $photoFilename;
-
+        $photo = $this->photoMeta($student, $classGroup);
         $curp = $profile->national_id ?? '';
-        $hasCurp = $curp !== '';
-        $hasAddress = $addressStr !== '';
-        $hasTutor = $tutorName !== '';
-        $hasPhone = ($phone ?? '') !== '';
+
         $missing = [];
-        if (! $hasPhoto) {
+        if (! $photo['has_photo']) {
             $missing[] = 'foto';
         }
-        if (! $hasCurp) {
+        if ($curp === '') {
             $missing[] = 'CURP';
         }
-        if (! $hasAddress) {
+        if ($addressStr === '') {
             $missing[] = 'dirección';
         }
-        if (! $hasTutor) {
+        if ($tutorName === '') {
             $missing[] = 'tutor';
         }
-        if (! $hasPhone) {
+        if (($phone ?? '') === '') {
             $missing[] = 'teléfono';
         }
-        $dataComplete = count($missing) === 0;
 
         $tracking = $student->credentialTrackings
             ->firstWhere('academic_year_id', $classGroup->academic_year_id);
@@ -154,23 +148,7 @@ class CredentialPrintingService
             'delivered' => $tracking->delivered,
             'lost' => $tracking->lost,
             'replacement_count' => (int) $tracking->replacement_count,
-        ] : [
-            'credential_printed' => false,
-            'nfc_ready' => false,
-            'ready_to_deliver' => false,
-            'paid' => false,
-            'delivered' => false,
-            'lost' => false,
-            'replacement_count' => 0,
-        ];
-
-        $lineaImpresion = implode(' | ', array_filter([
-            $fullName,
-            trim($grade.' '.$group),
-            $workshopNames ?: null,
-            $addressStr ?: null,
-            $photoFilename ?: null,
-        ], fn ($v) => $v !== null && $v !== ''));
+        ] : self::EMPTY_TRACKING;
 
         return [
             'student_id' => $student->id,
@@ -184,11 +162,13 @@ class CredentialPrintingService
             'tutor_name' => $tutorName,
             'tutor_relationship' => $guardian?->pivot?->relationship,
             'phone' => $phone ?? '',
-            'photo_filename' => $photoFilename,
-            'has_photo' => $hasPhoto,
-            'data_complete' => $dataComplete,
+            'photo_filename' => $photo['photo_filename'],
+            'photo_url' => $canSeePhotos ? $photo['photo_url'] : null,
+            'photo_updated_at' => $photo['photo_updated_at'],
+            'photo_freshness' => $photo['photo_freshness'],
+            'has_photo' => $photo['has_photo'],
+            'data_complete' => count($missing) === 0,
             'data_missing' => $missing,
-            'linea_impresion' => $lineaImpresion,
             'tracking' => $trackingPayload,
             'replacement_label' => $this->replacementLabel((int) $trackingPayload['replacement_count']),
         ];
@@ -229,70 +209,16 @@ class CredentialPrintingService
     /**
      * @return array{0: array<int, string>, 1: array<int, array<int, string|int>>}
      */
-    public function exportMatrix(ClassGroup $classGroup): array
+    public function exportMatrix(ClassGroup $classGroup, string $variant = 'credentials'): array
     {
         $bundle = $this->rowsForClassGroup($classGroup);
-        $headings = [
-            'ID alumno',
-            'Folio credencial',
-            'Nombre completo',
-            'Grado',
-            'Grupo',
-            'Taller (nombre completo)',
-            'CURP',
-            'Dirección',
-            'Tutor',
-            'Teléfono',
-            'Nombre archivo foto',
-            'Tiene foto',
-            'Datos completos',
-            'Faltantes',
-            'Línea impresión (nombre | grado grupo | taller | dirección | foto)',
-            'Credencial impresa',
-            'NFC listo',
-            'Listo para entregar',
-            'Pagado',
-            'Entregado',
-            'Perdido',
-            'Repuesto',
-        ];
 
-        $rows = [];
-        foreach ($bundle['rows'] as $r) {
-            $t = $r['tracking'];
-            $rows[] = [
-                $r['student_id'],
-                $r['credential_id'] ?? '',
-                $r['full_name'],
-                $r['grade'],
-                $r['group'],
-                $r['workshop_names'],
-                $r['curp'],
-                $r['address'],
-                $r['tutor_name'],
-                $r['phone'],
-                $r['photo_filename'] ?? '',
-                $r['has_photo'] ? 'Sí' : 'No',
-                $r['data_complete'] ? 'Sí' : 'No',
-                implode(', ', $r['data_missing'] ?? []),
-                $r['linea_impresion'],
-                $t['credential_printed'] ? 'Sí' : 'No',
-                $t['nfc_ready'] ? 'Sí' : 'No',
-                $t['ready_to_deliver'] ? 'Sí' : 'No',
-                $t['paid'] ? 'Sí' : 'No',
-                $t['delivered'] ? 'Sí' : 'No',
-                $t['lost'] ? 'Sí' : 'No',
-                $r['replacement_label'],
-            ];
-        }
-
-        return [$headings, $rows];
+        return $variant === 'report'
+            ? $this->reportMatrix($bundle)
+            : $this->credentialsMatrix($bundle);
     }
 
-    /**
-     * Ruta del archivo original en disco privado (misma convención que PrivateImageController).
-     */
-    public function originalPhotoRelativePath(Student $student, ClassGroup $classGroup): ?string
+    public function originalPhotoRelativePath(Student $student): ?string
     {
         $student->loadMissing([
             'profile',
@@ -300,14 +226,12 @@ class CredentialPrintingService
             'currentEnrollment.classGroup:id,name,grade_level_id',
         ]);
 
-        $pathService = app(StudentPhotoPathService::class);
-        $path = $pathService->resolveRelativePath($student, 'original');
-
+        $path = $this->photoPaths->resolveRelativePath($student, 'original');
         if ($path && Storage::disk('private')->exists($path)) {
             return $path;
         }
 
-        $profile = $pathService->resolveRelativePath($student, 'profile');
+        $profile = $this->photoPaths->resolveRelativePath($student, 'profile');
 
         return ($profile && Storage::disk('private')->exists($profile)) ? $profile : null;
     }
@@ -328,24 +252,234 @@ class CredentialPrintingService
             throw new \RuntimeException('No se pudo crear el archivo ZIP.');
         }
 
-        $bundle = $this->rowsForClassGroup($classGroup);
+        $classGroup->loadMissing(['gradeLevel', 'academicYear']);
         $added = [];
-        foreach ($bundle['rows'] as $row) {
-            $student = Student::with('profile')->find($row['student_id']);
-            if (! $student) {
+        foreach ($this->activeEnrollments($classGroup) as $enrollment) {
+            $student = $enrollment->student;
+            if (! $student?->profile) {
                 continue;
             }
-            $rel = $this->originalPhotoRelativePath($student, $classGroup);
+            $rel = $this->originalPhotoRelativePath($student);
             if (! $rel || ! $disk->exists($rel)) {
                 continue;
             }
-            $fn = $row['photo_filename'] ?: basename($rel);
-            $entry = 'fotos/'.$student->id.'_'.$fn;
-            $zip->addFile($disk->path($rel), $entry);
+            $fullName = trim(($student->profile->first_name ?? '').' '.($student->profile->last_name ?? ''));
+            $entry = $this->photoExportFilename($student, $fullName, $rel);
+            $zip->addFile($disk->path($rel), 'fotos/'.$entry);
             $added[] = $entry;
         }
         $zip->close();
 
         return ['path' => $zipPath, 'names' => $added];
+    }
+
+    /**
+     * @return Collection<int, Enrollment>
+     */
+    private function activeEnrollments(ClassGroup $classGroup): Collection
+    {
+        return Enrollment::query()
+            ->where('class_group_id', $classGroup->id)
+            ->where('status', EnrollmentStatus::Active)
+            ->with([
+                'student.profile.address',
+                'student.guardians.profile',
+                'student.currentEnrollment.classGroup.gradeLevel:id,name',
+                'student.currentEnrollment.classGroup:id,name,grade_level_id',
+                'student.credentialTrackings' => function ($q) use ($classGroup) {
+                    $q->where('academic_year_id', $classGroup->academic_year_id);
+                },
+                'student.workshops' => function ($q) use ($classGroup) {
+                    $q->wherePivot('academic_year_id', $classGroup->academic_year_id);
+                },
+            ])
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
+     * @return array{has_photo: bool, photo_filename: string, photo_url: ?string, photo_updated_at: ?string, photo_freshness: string}
+     */
+    private function photoMeta(Student $student, ClassGroup $classGroup): array
+    {
+        $rel = $this->originalPhotoRelativePath($student);
+        $hasPhoto = (bool) $rel;
+        $takenAt = null;
+        if ($rel && Storage::disk('private')->exists($rel)) {
+            $takenAt = Carbon::createFromTimestamp(Storage::disk('private')->lastModified($rel));
+        }
+        $fullName = trim(($student->profile?->first_name ?? '').' '.($student->profile?->last_name ?? ''));
+
+        return [
+            'has_photo' => $hasPhoto,
+            'photo_filename' => $hasPhoto ? $this->photoExportFilename($student, $fullName, $rel) : '',
+            'photo_url' => $hasPhoto ? $this->photoPaths->signedUrl($student, 'profile') : null,
+            'photo_updated_at' => $takenAt?->toIso8601String(),
+            'photo_freshness' => $this->resolveFreshness($takenAt, $classGroup->academicYear),
+        ];
+    }
+
+    private function resolveFreshness(?Carbon $takenAt, ?AcademicYear $year): string
+    {
+        if (! $takenAt) {
+            return 'missing';
+        }
+
+        $cycleStart = $this->cycleStart($year);
+        if (! $cycleStart) {
+            return 'unknown';
+        }
+
+        return $takenAt->gte($cycleStart) ? 'current' : 'stale';
+    }
+
+    private function cycleStart(?AcademicYear $year): ?Carbon
+    {
+        if (! $year) {
+            return null;
+        }
+        if ($year->starts_on) {
+            return Carbon::parse($year->starts_on)->startOfDay();
+        }
+        if ($year->year_start) {
+            return Carbon::create((int) $year->year_start, 8, 1)->startOfDay();
+        }
+
+        return null;
+    }
+
+    private function photoExportFilename(Student $student, string $fullName, ?string $relativePath = null): string
+    {
+        $rel = $relativePath ?? $this->originalPhotoRelativePath($student);
+        $ext = $rel ? strtolower(pathinfo($rel, PATHINFO_EXTENSION) ?: 'jpg') : 'jpg';
+        if ($ext === 'jpeg') {
+            $ext = 'jpg';
+        }
+        $slug = Str::slug($fullName, '_');
+
+        return $student->id.'_'.($slug !== '' ? $slug : 'alumno').'.'.$ext;
+    }
+
+    /**
+     * @param  array{meta: array<string, mixed>, rows: array<int, array<string, mixed>>}  $bundle
+     * @return array{0: array<int, string>, 1: array<int, array<int, string|int>>}
+     */
+    private function credentialsMatrix(array $bundle): array
+    {
+        $headings = [
+            'Nombre completo',
+            'Taller',
+            'CURP',
+            'Dirección',
+            'Tutor',
+            'Teléfono',
+            'Nombre archivo foto',
+        ];
+
+        $rows = [];
+        foreach ($bundle['rows'] as $r) {
+            $rows[] = [
+                $r['full_name'],
+                $r['workshop_names'],
+                $r['curp'],
+                $r['address'],
+                $r['tutor_name'],
+                $r['phone'],
+                $r['photo_filename'] ?? '',
+            ];
+        }
+
+        return [$headings, $rows];
+    }
+
+    /**
+     * @param  array{meta: array<string, mixed>, rows: array<int, array<string, mixed>>}  $bundle
+     * @return array{0: array<int, string>, 1: array<int, array<int, string|int>>}
+     */
+    private function reportMatrix(array $bundle): array
+    {
+        $headings = [
+            'ID alumno',
+            'Folio credencial',
+            'Nombre completo',
+            'Grado',
+            'Grupo',
+            'Taller',
+            'CURP',
+            'Dirección',
+            'Tutor',
+            'Teléfono',
+            'Nombre archivo foto',
+            'Vigencia foto',
+            'Fecha foto',
+            'Tiene foto',
+            'Datos completos',
+            'Faltantes',
+            'Credencial impresa',
+            'NFC listo',
+            'Listo para entregar',
+            'Pagado',
+            'Entregado',
+            'Perdido',
+            'Repuesto',
+        ];
+
+        $rows = [];
+        foreach ($bundle['rows'] as $r) {
+            $t = $r['tracking'];
+            $taken = $r['photo_updated_at']
+                ? Carbon::parse($r['photo_updated_at'])->timezone(config('app.timezone'))->format('Y-m-d H:i')
+                : '';
+            $rows[] = [
+                $r['student_id'],
+                $r['credential_id'] ?? '',
+                $r['full_name'],
+                $r['grade'],
+                $r['group'],
+                $r['workshop_names'],
+                $r['curp'],
+                $r['address'],
+                $r['tutor_name'],
+                $r['phone'],
+                $r['photo_filename'] ?? '',
+                $this->freshnessLabel((string) $r['photo_freshness']),
+                $taken,
+                $this->yesNo((bool) $r['has_photo']),
+                $this->yesNo((bool) $r['data_complete']),
+                implode(', ', $r['data_missing'] ?? []),
+                $this->yesNo((bool) $t['credential_printed']),
+                $this->yesNo((bool) $t['nfc_ready']),
+                $this->yesNo((bool) $t['ready_to_deliver']),
+                $this->yesNo((bool) $t['paid']),
+                $this->yesNo((bool) $t['delivered']),
+                $this->yesNo((bool) $t['lost']),
+                $r['replacement_label'],
+            ];
+        }
+
+        return [$headings, $rows];
+    }
+
+    private function freshnessLabel(string $freshness): string
+    {
+        return match ($freshness) {
+            'current' => 'Ciclo actual',
+            'stale' => 'Ciclo anterior',
+            'missing' => 'Sin foto',
+            default => 'Desconocida',
+        };
+    }
+
+    private function yesNo(bool $value): string
+    {
+        return $value ? 'Sí' : 'No';
+    }
+
+    private function viewerCanSeePhotos(): bool
+    {
+        $user = auth()->user();
+
+        return $user
+            && ($user->can('view student photos') || $user->can('manage student photos'));
     }
 }

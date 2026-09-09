@@ -2,14 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\EnrollmentStatus;
 use App\Exports\CredentialPrintingExport;
 use App\Http\Requests\UpdateStudentCredentialTrackingRequest;
 use App\Models\ClassGroup;
 use App\Models\Student;
 use App\Models\StudentCredentialTracking;
-use App\Enums\EnrollmentStatus;
 use App\Services\CredentialPrintingService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -39,14 +40,21 @@ class StudentCredentialPrintingController extends Controller
         ]);
     }
 
-    public function exportExcel(ClassGroup $classGroup): BinaryFileResponse
+    public function exportExcel(Request $request, ClassGroup $classGroup): BinaryFileResponse
     {
-        [$headings, $rows] = $this->credentialPrintingService->exportMatrix($classGroup);
+        $classGroup->loadMissing('gradeLevel');
+        $variant = $request->query('variant', 'credentials');
+        if (! in_array($variant, ['credentials', 'report'], true)) {
+            $variant = 'credentials';
+        }
+
+        [$headings, $rows] = $this->credentialPrintingService->exportMatrix($classGroup, $variant);
         $safe = preg_replace('/[^A-Za-z0-9_-]+/', '_', ($classGroup->gradeLevel?->name ?? 'grado').'_grupo_'.$classGroup->name);
+        $prefix = $variant === 'report' ? 'reporte_credenciales_' : 'datos_credenciales_';
 
         return Excel::download(
             new CredentialPrintingExport($headings, $rows),
-            'credenciales_'.$safe.'_'.$classGroup->id.'.xlsx'
+            $prefix.$safe.'_'.$classGroup->id.'.xlsx'
         );
     }
 
@@ -95,19 +103,6 @@ class StudentCredentialPrintingController extends Controller
             $data
         );
 
-        $enrollment->loadMissing('classGroup.gradeLevel', 'classGroup.academicYear');
-        $classGroup = $enrollment->classGroup;
-        $student->refresh()->load([
-            'profile.address',
-            'guardians.profile',
-            'credentialTrackings' => fn ($q) => $q->where('academic_year_id', $tracking->academic_year_id),
-            'workshops' => fn ($q) => $q->wherePivot('academic_year_id', $tracking->academic_year_id),
-        ]);
-
-        $row = $classGroup
-            ? $this->credentialPrintingService->buildRow($student, $classGroup)
-            : null;
-
         return response()->json([
             'success' => true,
             'data' => [
@@ -120,7 +115,6 @@ class StudentCredentialPrintingController extends Controller
                     'lost',
                     'replacement_count',
                 ]),
-                'row' => $row,
             ],
         ]);
     }

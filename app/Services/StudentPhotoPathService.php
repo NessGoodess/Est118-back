@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Student;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
@@ -146,6 +147,21 @@ class StudentPhotoPathService
                 'v' => $version,
             ]
         );
+    }
+
+    /**
+     * Last write time of the current photo on disk (original, then profile).
+     */
+    public function lastModifiedAt(Student $student): ?Carbon
+    {
+        foreach (['original', 'profile'] as $size) {
+            $path = $this->resolveRelativePath($student, $size);
+            if ($path && Storage::disk('private')->exists($path)) {
+                return Carbon::createFromTimestamp(Storage::disk('private')->lastModified($path));
+            }
+        }
+
+        return null;
     }
 
     private function resolveStablePath(int $studentId, string $size, ?string $stored): ?string

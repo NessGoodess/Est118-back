@@ -29,10 +29,14 @@ class SubjectSeeder extends Seeder
             ['name' => 'Confección del Vestido e Industria Textil', 'code' => null, 'description' => null],
             ['name' => 'Máquinas Herramienta y Sistemas de Control', 'code' => null, 'description' => null],
             ['name' => 'Informática', 'code' => null, 'description' => null],
+            ['name' => 'Tecnología', 'code' => 'TECNOLOGIA', 'description' => 'Slot de aula para desdoble de talleres.'],
         ];
 
         foreach ($subjects as $subject) {
-            Subject::create($subject);
+            $keys = $subject['code']
+                ? ['code' => $subject['code']]
+                : ['name' => $subject['name']];
+            Subject::query()->updateOrCreate($keys, $subject);
         }
     }
 }

@@ -53,6 +53,10 @@ class PermissionSeeder extends Seeder
 
             // Class attendance / reports (sidebar)
             'view attendance',
+            'edit attendance',
+            'view own schedules',
+            'view group schedules',
+            'view all schedules',
             'view reports',
 
             // Announcements
@@ -88,6 +92,7 @@ class PermissionSeeder extends Seeder
             // Misc used by UI
             'manage settings',
             'view groups',
+            'edit student workshops',
         ];
 
         foreach ($permissions as $permission) {
@@ -105,6 +110,20 @@ class PermissionSeeder extends Seeder
         $adminRole = Role::findOrCreate('admin', 'web');
         Role::findOrCreate('user', 'web');
         Role::findOrCreate('pre-enrollment-admin', 'web');
+
+        $teacherRole = Role::findOrCreate('teacher', 'web');
+        $teacherRole->syncPermissions([
+            'view attendance',
+            'edit attendance',
+            'view own schedules',
+        ]);
+
+        $staffRole = Role::findOrCreate('staff', 'web');
+        $staffRole->syncPermissions([
+            'view attendance',
+            'edit attendance',
+            'view group schedules',
+        ]);
 
         $adminRole->syncPermissions(Permission::all());
 
@@ -124,6 +143,13 @@ class PermissionSeeder extends Seeder
                 'view admission enrollment',
                 'edit admission enrollment',
             ]);
+        }
+
+        $studentEditorRoles = Role::query()
+            ->whereHas('permissions', fn ($query) => $query->where('name', 'edit students'))
+            ->get();
+        foreach ($studentEditorRoles as $role) {
+            $role->givePermissionTo('edit student workshops');
         }
 
         // Roles that already publish announcements manage the rest of the CMS

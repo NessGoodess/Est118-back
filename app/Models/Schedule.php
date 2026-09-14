@@ -16,10 +16,11 @@ class Schedule extends Model
         'school_class_id',
         'workshop_id',
         'classroom_id',
+        'teacher_id',
         'day',
         'start_time',
         'end_time',
-        'schedule_type'
+        'schedule_type',
     ];
 
     /**
@@ -50,6 +51,11 @@ class Schedule extends Model
     public function workshop(): BelongsTo
     {
         return $this->belongsTo(Workshop::class);
+    }
+
+    public function teacher(): BelongsTo
+    {
+        return $this->belongsTo(Teacher::class);
     }
 
     /**

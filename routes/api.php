@@ -20,6 +20,7 @@ use App\Http\Controllers\Content\LegalDocumentController;
 use App\Http\Controllers\Content\MediaUploadController;
 use App\Http\Controllers\EnrollmentPromotionController;
 use App\Http\Controllers\FirstGradeGroupAssignmentController;
+use App\Http\Controllers\FirstGradeWorkshopAssignmentController;
 use App\Http\Controllers\GeneralAttendanceController;
 use App\Http\Controllers\NfcCredentialController;
 use App\Http\Controllers\NfcReaderSlotController;
@@ -35,6 +36,8 @@ use App\Http\Controllers\students\GradeLevelController;
 use App\Http\Controllers\students\PrivateImageController;
 use App\Http\Controllers\TelegramController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\WorkshopController;
+use App\Http\Controllers\WorkshopOfferingController;
 // resources
 use App\Http\Resources\UserResource;
 use Illuminate\Http\Request;
@@ -53,7 +56,7 @@ Route::prefix('notifications')->middleware(['auth:sanctum', 'verified'])->group(
 
 Route::middleware(['auth:sanctum', 'verified'])->get('/user', function (Request $request) {
     $user = $request->user();
-    $user->load('roles.permissions', 'permissions');
+    $user->load('roles.permissions', 'permissions', 'profile.teacher');
 
     return new UserResource($user);
 });
@@ -73,10 +76,9 @@ Route::prefix('current-user')->group(function () {
 Route::group(['middleware' => ['auth:sanctum', 'verified']], function () {
     Route::get('/all-students', [StudentController::class, 'index']);
     Route::get('/class/{schoolClassId}/date/{date}', [AttendanceController::class, 'getClassAttendance']);
-    Route::get('/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
     Route::post('/record', [AttendanceController::class, 'recordAttendance']);
-    Route::get('/report/class/{schoolClassId}', [AttendanceController::class, 'getClassReport']);
-    Route::get('/report/student/{studentId}', [AttendanceController::class, 'getStudentReport']);
+    Route::post('/record-batch', [AttendanceController::class, 'recordAttendanceBatch']);
+    Route::get('/schedules', [ScheduleController::class, 'index']);
 });
 
 /**
@@ -132,7 +134,15 @@ Route::prefix('attendance')->middleware(['auth:sanctum', 'verified'])->group(fun
 
 Route::post('/telegram/webhook', [TelegramController::class, 'webhook']);
 
-Route::get('/schedules', [ScheduleController::class, 'index']);
+Route::get('/workshops', [WorkshopController::class, 'index'])
+    ->middleware(['auth:sanctum', 'verified']);
+
+Route::get('/workshop-offerings', [WorkshopOfferingController::class, 'index'])
+    ->middleware(['auth:sanctum', 'verified']);
+Route::put('/workshop-offerings', [WorkshopOfferingController::class, 'upsert'])
+    ->middleware(['auth:sanctum', 'verified']);
+Route::post('/workshops/bulk-gh', [WorkshopController::class, 'bulkGh'])
+    ->middleware(['auth:sanctum', 'verified']);
 
 /**
  * Admission Settings Routes
@@ -201,6 +211,7 @@ Route::prefix('admissions')->group(function () {
         Route::patch('/{enrollment}/promotion-decision', [EnrollmentPromotionController::class, 'updateDecision'])
             ->middleware('permission:manage admission cycles|manage re-enrollment');
         Route::post('/first-grade-group-assignment', [FirstGradeGroupAssignmentController::class, 'assign']);
+        Route::post('/first-grade-workshop-assignment', [FirstGradeWorkshopAssignmentController::class, 'assign']);
     });
 });
 
@@ -406,6 +417,8 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
 
     Route::get('/{student}', [StudentController::class, 'show'])
         ->middleware('permission:view students');
+
+    Route::put('/{student}/workshop', [WorkshopController::class, 'assignToStudent']);
 
     Route::patch('/{student}', [StudentController::class, 'update'])
         ->middleware('permission:edit students');

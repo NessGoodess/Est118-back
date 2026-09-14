@@ -20,6 +20,13 @@ class StudentDetailResource extends JsonResource
         $photos = app(StudentPhotoPathService::class);
         $currentEnrollment = $student->enrollments->where('status', 'active')->first();
         $address = $profile?->relationLoaded('address') ? $profile->address : null;
+        $yearId = $currentEnrollment?->academic_year_id;
+        $workshopEnrollment = $yearId
+            ? $student->workshopEnrollmentForYear((int) $yearId)
+            : null;
+        $assignedWorkshop = $workshopEnrollment?->status?->value === 'assigned'
+            ? $workshopEnrollment
+            : null;
 
         return [
             'student_info' => [
@@ -69,6 +76,29 @@ class StudentDetailResource extends JsonResource
                     ? $currentEnrollment->promotion_result->value
                     : $currentEnrollment->promotion_result,
             ] : null,
+            'current_workshop' => $assignedWorkshop ? [
+                'workshop_id' => $assignedWorkshop->workshop_id,
+                'name' => $assignedWorkshop->workshop?->name,
+                'code' => $assignedWorkshop->workshop?->code,
+                'source' => $assignedWorkshop->source instanceof \BackedEnum
+                    ? $assignedWorkshop->source->value
+                    : $assignedWorkshop->source,
+                'status' => $assignedWorkshop->status instanceof \BackedEnum
+                    ? $assignedWorkshop->status->value
+                    : $assignedWorkshop->status,
+                'notes' => $assignedWorkshop->notes,
+            ] : ($workshopEnrollment ? [
+                'workshop_id' => $workshopEnrollment->workshop_id,
+                'name' => $workshopEnrollment->workshop?->name,
+                'code' => $workshopEnrollment->workshop?->code,
+                'source' => $workshopEnrollment->source instanceof \BackedEnum
+                    ? $workshopEnrollment->source->value
+                    : $workshopEnrollment->source,
+                'status' => $workshopEnrollment->status instanceof \BackedEnum
+                    ? $workshopEnrollment->status->value
+                    : $workshopEnrollment->status,
+                'notes' => $workshopEnrollment->notes,
+            ] : null),
             'subjects' => $currentEnrollment
                 ? $currentEnrollment->classGroup->schoolClasses
                     ->map(fn ($class) => $class->subject?->name)

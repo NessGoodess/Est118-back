@@ -24,6 +24,8 @@ class UserResource extends JsonResource
             'deleted_at' => $this->deleted_at,
             'roles' => $this->roles->pluck('name'),
             'permissions' => $this->getAllPermissions()->pluck('name'),
+            'teacher_id' => $this->linkedTeacherId(),
+            'schedule_scope' => $this->scheduleScope(),
         ];
     }
 }

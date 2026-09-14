@@ -43,6 +43,16 @@ class AcademicYear extends Model
         return $this->hasMany(Enrollment::class);
     }
 
+    public function workshopOfferings(): HasMany
+    {
+        return $this->hasMany(WorkshopOffering::class);
+    }
+
+    public function workshopEnrollments(): HasMany
+    {
+        return $this->hasMany(WorkshopEnrollment::class);
+    }
+
     public static function rangesOverlap(
         string $startsOn,
         string $endsOn,

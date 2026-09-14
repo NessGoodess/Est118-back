@@ -17,6 +17,7 @@ class FillerSeeder extends Seeder
             ClassGroupSeeder::class,
             ClassroomSeeder::class,
             SubjectSeeder::class,
+            WorkshopSeeder::class,
         ]);
     }
 }

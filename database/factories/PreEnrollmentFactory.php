@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\AdmissionCycleStatus;
 use App\Enums\AdmissionWorkshop;
 use App\Enums\DocumentsStatus;
 use App\Enums\PaymentStatus;
@@ -29,7 +30,10 @@ class PreEnrollmentFactory extends Factory
         );
 
         return [
-            'admission_cycle_id' => AdmissionCycle::factory()->active(),
+            'admission_cycle_id' => AdmissionCycle::query()
+                ->where('status', AdmissionCycleStatus::ACTIVE)
+                ->value('id')
+                ?? AdmissionCycle::factory()->active(),
             'status' => PreEnrollmentStatus::PENDING,
             'documents_status' => DocumentsStatus::PENDING,
             'payment_status' => PaymentStatus::PENDING,

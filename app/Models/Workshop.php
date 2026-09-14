@@ -4,8 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Workshop extends Model
 {
@@ -14,64 +14,37 @@ class Workshop extends Model
 
     protected $fillable = [
         'name',
+        'code',
         'description',
-        'teacher_id',
-        'academic_year_id',
-        'classroom_id',
-        'capacity',
         'is_active',
     ];
 
-    /**
-     * Get the teacher that owns the Workshop
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
-     */
-    public function teacher(): BelongsTo
+    protected function casts(): array
     {
-        return $this->belongsTo(Teacher::class);
+        return [
+            'is_active' => 'boolean',
+        ];
     }
 
-    /**
-     * The students that belong to the Workshop
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
-     */
+    public function offerings(): HasMany
+    {
+        return $this->hasMany(WorkshopOffering::class);
+    }
+
+    public function enrollments(): HasMany
+    {
+        return $this->hasMany(WorkshopEnrollment::class);
+    }
+
     public function students(): BelongsToMany
     {
         return $this->belongsToMany(Student::class, 'workshop_enrollments')
-            ->withPivot('academic_year_id');
+            ->withPivot(['academic_year_id', 'source', 'status', 'assigned_by', 'notes'])
+            ->withTimestamps();
     }
 
-    /**
-     * Get the eligible students for the Workshop based on grade level
-     *
-     * @return \Illuminate\Database\Eloquent\Builder
-     */
-    public function eligibleStudents()
+    public function schedules(): HasMany
     {
-        return Student::whereHas('enrollments.classGroup', function ($query) {
-            $query->where('grade_level_id', $this->grade_level_id);
-        });
-    }
-
-    /**
-     * Get the academicYear that owns the Workshop
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
-     */
-    public function academicYear(): BelongsTo
-    {
-        return $this->belongsTo(AcademicYear::class);
-    }
-
-    /**
-     * Get the classroom that owns the Workshop
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
-     */
-    public function classroom(): BelongsTo
-    {
-        return $this->belongsTo(Classroom::class);
+        return $this->hasMany(Schedule::class);
     }
 }

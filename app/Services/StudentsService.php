@@ -30,6 +30,7 @@ class StudentsService
             'enrollments.classGroup.gradeLevel',
             'enrollments.classGroup.academicYear',
             'enrollments.classGroup.schoolClasses.subject',
+            'workshopEnrollments.workshop',
             'guardians.profile',
         ])->findOrFail($id);
     }

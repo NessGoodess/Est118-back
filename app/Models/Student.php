@@ -190,10 +190,28 @@ class Student extends Model
      *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
      */
+    public function workshopEnrollments(): HasMany
+    {
+        return $this->hasMany(WorkshopEnrollment::class);
+    }
+
     public function workshops(): BelongsToMany
     {
         return $this->belongsToMany(Workshop::class, 'workshop_enrollments')
-            ->withPivot(['academic_year_id', 'grade_level_id', 'group_number']);
+            ->withPivot(['academic_year_id', 'source', 'status', 'assigned_by', 'notes'])
+            ->withTimestamps();
+    }
+
+    public function workshopEnrollmentForYear(int $academicYearId): ?WorkshopEnrollment
+    {
+        if ($this->relationLoaded('workshopEnrollments')) {
+            return $this->workshopEnrollments
+                ->first(fn (WorkshopEnrollment $row) => (int) $row->academic_year_id === $academicYearId);
+        }
+
+        return $this->workshopEnrollments()
+            ->where('academic_year_id', $academicYearId)
+            ->first();
     }
 
     /**

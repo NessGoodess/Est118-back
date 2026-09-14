@@ -83,4 +83,43 @@ class User extends Authenticatable
     {
         return $this->hasMany(GeneralAttendance::class, 'recorded_by');
     }
+
+    public function linkedTeacherId(): ?int
+    {
+        $this->loadMissing('profile.teacher');
+        $id = $this->profile?->teacher?->id;
+
+        return $id ? (int) $id : null;
+    }
+
+    /**
+     * @return 'all'|'group'|'own'|'none'
+     */
+    public function scheduleScope(): string
+    {
+        if ($this->can('view all schedules')) {
+            return 'all';
+        }
+        if ($this->can('view group schedules')) {
+            return 'group';
+        }
+        if ($this->can('view own schedules')) {
+            return 'own';
+        }
+
+        return 'none';
+    }
+
+    public function ownsSchedule(Schedule $schedule): bool
+    {
+        $teacherId = $this->linkedTeacherId();
+        if ($teacherId === null) {
+            return false;
+        }
+
+        $schedule->loadMissing('schoolClass');
+
+        return (int) $schedule->teacher_id === $teacherId
+            || (int) ($schedule->schoolClass?->teacher_id ?? 0) === $teacherId;
+    }
 }

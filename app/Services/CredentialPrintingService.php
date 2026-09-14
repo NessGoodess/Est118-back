@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\EnrollmentStatus;
+use App\Enums\WorkshopEnrollmentStatus;
 use App\Models\AcademicYear;
 use App\Models\Address;
 use App\Models\ClassGroup;
@@ -104,10 +105,10 @@ class CredentialPrintingService
         $group = $classGroup->name;
         $fullName = trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''));
 
-        $workshops = $student->relationLoaded('workshops')
-            ? $student->workshops
-            : $student->workshops()->wherePivot('academic_year_id', $classGroup->academic_year_id)->get();
-        $workshopNames = $workshops->pluck('name')->filter()->unique()->implode(' | ');
+        $workshopRow = $student->workshopEnrollmentForYear((int) $classGroup->academic_year_id);
+        $workshopNames = ($workshopRow && $workshopRow->status === WorkshopEnrollmentStatus::Assigned)
+            ? (string) ($workshopRow->workshop?->name ?: '—')
+            : '—';
 
         $addressStr = $this->formatAddress($profile->address);
         $guardian = $student->guardians->first();
@@ -289,8 +290,9 @@ class CredentialPrintingService
                 'student.credentialTrackings' => function ($q) use ($classGroup) {
                     $q->where('academic_year_id', $classGroup->academic_year_id);
                 },
-                'student.workshops' => function ($q) use ($classGroup) {
-                    $q->wherePivot('academic_year_id', $classGroup->academic_year_id);
+                'student.workshopEnrollments' => function ($q) use ($classGroup) {
+                    $q->where('academic_year_id', $classGroup->academic_year_id)
+                        ->with('workshop:id,name,code');
                 },
             ])
             ->orderBy('id')

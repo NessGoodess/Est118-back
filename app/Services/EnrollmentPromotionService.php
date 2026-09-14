@@ -4,14 +4,21 @@ namespace App\Services;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\PromotionResult;
+use App\Enums\WorkshopEnrollmentSource;
+use App\Enums\WorkshopEnrollmentStatus;
 use App\Models\AcademicYear;
 use App\Models\ClassGroup;
 use App\Models\Enrollment;
+use App\Models\WorkshopEnrollment;
+use App\Models\WorkshopOffering;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class EnrollmentPromotionService
 {
+    public function __construct(
+        private readonly WorkshopEnrollmentWriter $workshopWriter
+    ) {}
     /**
      * Promote one academic year into the next one.
      *
@@ -49,10 +56,21 @@ class EnrollmentPromotionService
             'promoted' => 0,
             'retained' => 0,
             'graduated' => 0,
+            'workshops_inherited' => 0,
+            'workshops_skipped_manual' => 0,
+            'workshops_missing' => 0,
+            'workshop_missing_student_ids' => [],
+            'workshops_over_capacity' => [],
             'errors' => [],
         ];
 
-        $runner = function () use ($enrollments, $toYear, &$summary): void {
+        $fromWorkshops = WorkshopEnrollment::query()
+            ->where('academic_year_id', $fromYear->id)
+            ->where('status', WorkshopEnrollmentStatus::Assigned->value)
+            ->get()
+            ->keyBy('student_id');
+
+        $runner = function () use ($enrollments, $toYear, $fromWorkshops, &$summary): void {
             foreach ($enrollments as $enrollment) {
                 $summary['processed']++;
 
@@ -87,6 +105,35 @@ class EnrollmentPromotionService
                     ]);
                     $nextEnrollment->save();
 
+                    $fromWorkshop = $fromWorkshops->get($enrollment->student_id);
+                    if ($fromWorkshop) {
+                        $existingDest = WorkshopEnrollment::query()
+                            ->where('student_id', $enrollment->student_id)
+                            ->where('academic_year_id', $toYear->id)
+                            ->first();
+
+                        if ($existingDest?->source === WorkshopEnrollmentSource::Manual) {
+                            $summary['workshops_skipped_manual']++;
+                        } else {
+                            $this->workshopWriter->upsert(
+                                studentId: $enrollment->student_id,
+                                academicYearId: $toYear->id,
+                                workshopId: (int) $fromWorkshop->workshop_id,
+                                source: WorkshopEnrollmentSource::Inherited,
+                                status: WorkshopEnrollmentStatus::Assigned,
+                                notes: $existingDest?->notes,
+                                assignedBy: null,
+                                protectManual: true,
+                            );
+                            $summary['workshops_inherited']++;
+                        }
+                    } else {
+                        $summary['workshops_missing']++;
+                        if (count($summary['workshop_missing_student_ids']) < 100) {
+                            $summary['workshop_missing_student_ids'][] = $enrollment->student_id;
+                        }
+                    }
+
                     $enrollment->update([
                         'status' => EnrollmentStatus::Completed,
                         'promotion_result' => $decision['result'],
@@ -105,6 +152,8 @@ class EnrollmentPromotionService
                     ];
                 }
             }
+
+            $summary['workshops_over_capacity'] = $this->overCapacityRows($toYear->id);
         };
 
         if ($dryRun) {
@@ -152,6 +201,44 @@ class EnrollmentPromotionService
             'result' => PromotionResult::PROMOTED,
             'target_grade' => $gradeName === '1°' ? '2°' : '3°',
         ];
+    }
+
+    /**
+     * @return list<array{workshop_id:int, workshop_name:?string, occupied:int, capacity:int}>
+     */
+    private function overCapacityRows(int $academicYearId): array
+    {
+        $offerings = WorkshopOffering::query()
+            ->with('workshop:id,name')
+            ->where('academic_year_id', $academicYearId)
+            ->whereNotNull('capacity')
+            ->get();
+
+        if ($offerings->isEmpty()) {
+            return [];
+        }
+
+        $occupied = WorkshopEnrollment::query()
+            ->where('academic_year_id', $academicYearId)
+            ->where('status', WorkshopEnrollmentStatus::Assigned->value)
+            ->selectRaw('workshop_id, COUNT(*) as occupied')
+            ->groupBy('workshop_id')
+            ->pluck('occupied', 'workshop_id');
+
+        $rows = [];
+        foreach ($offerings as $offering) {
+            $taken = (int) ($occupied[$offering->workshop_id] ?? 0);
+            if ($taken > (int) $offering->capacity) {
+                $rows[] = [
+                    'workshop_id' => $offering->workshop_id,
+                    'workshop_name' => $offering->workshop?->name,
+                    'occupied' => $taken,
+                    'capacity' => (int) $offering->capacity,
+                ];
+            }
+        }
+
+        return $rows;
     }
 
     private function findTargetGroup(int $academicYearId, string $gradeName, string $groupName): ClassGroup

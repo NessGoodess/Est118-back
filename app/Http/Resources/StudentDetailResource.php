@@ -21,6 +21,7 @@ class StudentDetailResource extends JsonResource
         $currentEnrollment = $student->enrollments->where('status', 'active')->first();
         $address = $profile?->relationLoaded('address') ? $profile->address : null;
         $yearId = $currentEnrollment?->academic_year_id;
+        $academicYear = $currentEnrollment?->classGroup?->academicYear;
         $workshopEnrollment = $yearId
             ? $student->workshopEnrollmentForYear((int) $yearId)
             : null;
@@ -46,6 +47,8 @@ class StudentDetailResource extends JsonResource
                 'profile_picture_filename' => $profile?->profile_picture,
                 'profile_updated_at' => $profile?->updated_at,
             ],
+            /** current | stale | missing | unknown */
+            'photo_status' => $photos->freshnessForStudent($student, $academicYear),
             'photos' => $this->canSeeStudentPhotos($request) ? [
                 'thumbnail_url' => $photos->signedUrl($student, 'thumb'),
                 'profile_url' => $photos->signedUrl($student, 'profile'),

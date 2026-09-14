@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AcademicYear;
 use App\Models\Student;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Storage;
@@ -159,6 +160,48 @@ class StudentPhotoPathService
             if ($path && Storage::disk('private')->exists($path)) {
                 return Carbon::createFromTimestamp(Storage::disk('private')->lastModified($path));
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Photo freshness vs academic-year start.
+     *
+     * @return 'current'|'stale'|'missing'|'unknown'
+     */
+    public function freshnessForStudent(Student $student, ?AcademicYear $year): string
+    {
+        return $this->resolveFreshness($this->lastModifiedAt($student), $year);
+    }
+
+    /**
+     * @return 'current'|'stale'|'missing'|'unknown'
+     */
+    public function resolveFreshness(?Carbon $takenAt, ?AcademicYear $year): string
+    {
+        if (! $takenAt) {
+            return 'missing';
+        }
+
+        $cycleStart = $this->cycleStart($year);
+        if (! $cycleStart) {
+            return 'unknown';
+        }
+
+        return $takenAt->gte($cycleStart) ? 'current' : 'stale';
+    }
+
+    public function cycleStart(?AcademicYear $year): ?Carbon
+    {
+        if (! $year) {
+            return null;
+        }
+        if ($year->starts_on) {
+            return Carbon::parse($year->starts_on)->startOfDay();
+        }
+        if ($year->year_start) {
+            return Carbon::create((int) $year->year_start, 8, 1)->startOfDay();
         }
 
         return null;

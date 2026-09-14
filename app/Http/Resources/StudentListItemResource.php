@@ -22,6 +22,7 @@ class StudentListItemResource extends JsonResource
 
         $grade = optional($enrollment?->classGroup?->gradeLevel)?->name ?? 'N/A';
         $group = optional($enrollment?->classGroup)?->name ?? 'N/A';
+        $year = $enrollment?->classGroup?->academicYear;
 
         return [
             'id' => $student->id,
@@ -38,6 +39,8 @@ class StudentListItemResource extends JsonResource
             'photo_url' => $this->canSeeStudentPhotos($request)
                 ? $photos->signedUrl($student, 'profile')
                 : null,
+            /** current | stale | missing | unknown */
+            'photo_status' => $photos->freshnessForStudent($student, $year),
         ];
     }
 

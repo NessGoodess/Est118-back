@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\WorkshopEnrollmentStatus;
-use App\Models\AcademicYear;
 use App\Models\Address;
 use App\Models\ClassGroup;
 use App\Models\Enrollment;
@@ -317,37 +316,8 @@ class CredentialPrintingService
             'photo_filename' => $hasPhoto ? $this->photoExportFilename($student, $fullName, $rel) : '',
             'photo_url' => $hasPhoto ? $this->photoPaths->signedUrl($student, 'profile') : null,
             'photo_updated_at' => $takenAt?->toIso8601String(),
-            'photo_freshness' => $this->resolveFreshness($takenAt, $classGroup->academicYear),
+            'photo_freshness' => $this->photoPaths->resolveFreshness($takenAt, $classGroup->academicYear),
         ];
-    }
-
-    private function resolveFreshness(?Carbon $takenAt, ?AcademicYear $year): string
-    {
-        if (! $takenAt) {
-            return 'missing';
-        }
-
-        $cycleStart = $this->cycleStart($year);
-        if (! $cycleStart) {
-            return 'unknown';
-        }
-
-        return $takenAt->gte($cycleStart) ? 'current' : 'stale';
-    }
-
-    private function cycleStart(?AcademicYear $year): ?Carbon
-    {
-        if (! $year) {
-            return null;
-        }
-        if ($year->starts_on) {
-            return Carbon::parse($year->starts_on)->startOfDay();
-        }
-        if ($year->year_start) {
-            return Carbon::create((int) $year->year_start, 8, 1)->startOfDay();
-        }
-
-        return null;
     }
 
     private function photoExportFilename(Student $student, string $fullName, ?string $relativePath = null): string

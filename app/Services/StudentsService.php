@@ -76,8 +76,9 @@ class StudentsService
         return Student::with([
             'profile:id,first_name,last_name,profile_picture,updated_at',
             'enrollments' => fn ($q) => $q->where('status', 'active')->with([
-                'classGroup:id,name,grade_level_id',
+                'classGroup:id,name,grade_level_id,academic_year_id',
                 'classGroup.gradeLevel:id,name',
+                'classGroup.academicYear',
             ]),
         ])->get();
     }

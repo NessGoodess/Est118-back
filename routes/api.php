@@ -19,6 +19,8 @@ use App\Http\Controllers\Content\IdentityBannerController;
 use App\Http\Controllers\Content\LegalDocumentController;
 use App\Http\Controllers\Content\MediaUploadController;
 use App\Http\Controllers\EnrollmentPromotionController;
+use App\Http\Controllers\Export\ExportTemplateController;
+use App\Http\Controllers\Export\StudentExportController;
 use App\Http\Controllers\FirstGradeGroupAssignmentController;
 use App\Http\Controllers\FirstGradeWorkshopAssignmentController;
 use App\Http\Controllers\GeneralAttendanceController;
@@ -388,6 +390,16 @@ Route::middleware('auth:sanctum', 'verified')->group(function () {
 });
 
 /**
+ * Export templates (user-owned Excel templates)
+ */
+Route::prefix('export-templates')->middleware(['auth:sanctum', 'verified', 'permission:manage export templates'])->group(function () {
+    Route::get('/', [ExportTemplateController::class, 'index']);
+    Route::post('/', [ExportTemplateController::class, 'store']);
+    Route::patch('/{exportTemplate}/default', [ExportTemplateController::class, 'setDefault']);
+    Route::delete('/{exportTemplate}', [ExportTemplateController::class, 'destroy']);
+});
+
+/**
  * student management
  */
 Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(function () {
@@ -396,6 +408,15 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
         ->middleware('permission:view students');
 
     Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
+
+    Route::post('/export-with-template', [StudentExportController::class, 'exportWithTemplate'])
+        ->middleware('permission:view students');
+
+    Route::post('/export-csv', [StudentExportController::class, 'exportCsv'])
+        ->middleware('permission:view students');
+
+    Route::post('/export-rows', [StudentExportController::class, 'exportRows'])
+        ->middleware('permission:view students');
 
     Route::prefix('credentials')->group(function () {
         Route::get('grades/{grade}/class-groups', [StudentCredentialPrintingController::class, 'classGroupsForGrade'])

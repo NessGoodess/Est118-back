@@ -93,6 +93,7 @@ class PermissionSeeder extends Seeder
             'manage settings',
             'view groups',
             'edit student workshops',
+            'manage export templates',
         ];
 
         foreach ($permissions as $permission) {
@@ -150,6 +151,13 @@ class PermissionSeeder extends Seeder
             ->get();
         foreach ($studentEditorRoles as $role) {
             $role->givePermissionTo('edit student workshops');
+        }
+
+        $studentViewerRoles = Role::query()
+            ->whereHas('permissions', fn ($query) => $query->where('name', 'view students'))
+            ->get();
+        foreach ($studentViewerRoles as $role) {
+            $role->givePermissionTo('manage export templates');
         }
 
         // Roles that already publish announcements manage the rest of the CMS

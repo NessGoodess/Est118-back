@@ -64,7 +64,6 @@ class ReEnrollmentApplication extends Model
     public function isChecklistComplete(): bool
     {
         return collect([
-            $this->passed_cycle,
             $this->documents_complete,
             $this->guardian_updated,
             $this->phone_updated,

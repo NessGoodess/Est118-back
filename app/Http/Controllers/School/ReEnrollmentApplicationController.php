@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\School;
 
 use App\Enums\ReEnrollmentValidationStatus;
-use App\Enums\ReEnrollmentProcessStep;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\School\BulkDecideReEnrollmentApplicationsRequest;
+use App\Http\Requests\School\BulkValidateReEnrollmentApplicationsRequest;
 use App\Http\Requests\School\UpdateReEnrollmentApplicationRequest;
 use App\Models\School\ReEnrollmentApplication;
 use App\Models\School\ReEnrollmentPeriod;
@@ -13,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
+use RuntimeException;
 
 class ReEnrollmentApplicationController extends Controller implements HasMiddleware
 {
@@ -81,37 +83,86 @@ class ReEnrollmentApplicationController extends Controller implements HasMiddlew
         ReEnrollmentPeriod $period,
         ReEnrollmentApplication $application
     ): JsonResponse {
-        if ($period->status === \App\Enums\ReEnrollmentPeriodStatus::FINALIZED) {
-            return response()->json(['success' => false, 'message' => 'El periodo está finalizado. Solo consulta.'], 422);
-        }
-
-        if ($period->status !== \App\Enums\ReEnrollmentPeriodStatus::OPEN) {
-            return response()->json(['success' => false, 'message' => 'Abre el periodo de reinscripción para validar alumnos.'], 422);
-        }
-
-        try {
-            $this->reEnrollmentService->assertStepAccess($period, ReEnrollmentProcessStep::VALIDATION);
-        } catch (\RuntimeException $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
-        }
-
         if ($application->re_enrollment_period_id !== $period->id) {
             return response()->json(['success' => false, 'message' => 'Solicitud no pertenece al periodo.'], 404);
         }
 
-        $application->update($request->validated());
+        $payload = $request->validated();
+        $status = $payload['status'] ?? null;
+        $statusValue = $status instanceof ReEnrollmentValidationStatus ? $status->value : $status;
+        $shouldReject = $statusValue === ReEnrollmentValidationStatus::REJECTED->value;
 
-        if ($application->isChecklistComplete() && $application->status !== ReEnrollmentValidationStatus::REJECTED) {
-            $application->update(['status' => ReEnrollmentValidationStatus::VALIDATED]);
+        try {
+            $this->reEnrollmentService->assertCanValidate($period);
 
-            // Una sola fuente de verdad para promoción: is_approved en la inscripción.
-            if ($application->enrollment) {
-                $application->enrollment->update([
-                    'is_approved' => (bool) $application->passed_cycle,
-                ]);
+            if ($shouldReject) {
+                $this->reEnrollmentService->rejectApplication($application->loadMissing('enrollment'));
+            } else {
+                unset($payload['passed_cycle']);
+                $application->update($payload);
+                $this->reEnrollmentService->applyChecklistOutcome($application->fresh());
             }
+        } catch (RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }
 
         return response()->json(['success' => true, 'data' => $application->fresh()]);
+    }
+
+    public function bulkValidate(
+        BulkValidateReEnrollmentApplicationsRequest $request,
+        ReEnrollmentPeriod $period
+    ): JsonResponse {
+        try {
+            $result = $this->reEnrollmentService->bulkValidateChecklist(
+                $period,
+                array_values(array_unique($request->validated('scopes'))),
+                $request->validated('grade'),
+                $request->validated('group')
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $result['updated'] === 0
+                ? 'No hay alumnos pendientes de validar con ese filtro.'
+                : "Se validaron {$result['updated']} alumnos.",
+            'data' => $result,
+        ]);
+    }
+
+    public function bulkDecide(
+        BulkDecideReEnrollmentApplicationsRequest $request,
+        ReEnrollmentPeriod $period
+    ): JsonResponse {
+        $reject = (bool) $request->boolean('reject');
+        $approved = $request->exists('is_approved') ? $request->boolean('is_approved') : null;
+
+        try {
+            $result = $this->reEnrollmentService->bulkDecide(
+                $period,
+                array_map('intval', $request->validated('ids')),
+                $reject ? null : $approved,
+                $reject
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        $message = $reject
+            ? ($result['updated'] === 0 ? 'No se rechazó ningún alumno.' : "Se rechazaron {$result['updated']} alumnos.")
+            : ($result['updated'] === 0
+                ? 'No se actualizó ninguna decisión.'
+                : ($approved
+                    ? "Se aprobaron {$result['updated']} alumnos."
+                    : "Se reprobaron {$result['updated']} alumnos."));
+
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'data' => $result,
+        ]);
     }
 }

@@ -74,13 +74,15 @@ class ReEnrollmentService
             ->count();
         $unresolved = $pending + $inReview;
         $missingEnrollmentDecisions = $this->missingOriginEnrollmentDecisions($period);
+        $unsyncedEnrollments = $this->unsyncedOriginEnrollmentsCount($period);
         $canAccessPromotion = $this->canAccessStep($period, ReEnrollmentProcessStep::PROMOTION);
         $canDecide = $canAccessPromotion
             && $unresolved === 0
             && $period->promotion_executed_at === null;
         $canPromote = $canDecide
             && $pendingGradeDecisions === 0
-            && $missingEnrollmentDecisions === 0;
+            && $missingEnrollmentDecisions === 0
+            && $unsyncedEnrollments === 0;
 
         $resolved = $validated + $rejected;
         $percent = $total > 0 ? (int) round(($resolved / $total) * 100) : 0;
@@ -105,6 +107,7 @@ class ReEnrollmentService
             'unresolved' => $unresolved,
             'pending_grade_decisions' => $pendingGradeDecisions,
             'missing_enrollment_decisions' => $missingEnrollmentDecisions,
+            'unsynced_enrollments' => $unsyncedEnrollments,
             'with_debts' => $withDebts,
             'ready_for_promotion' => $readyForPromotion,
             'progress_percent' => $percent,
@@ -175,6 +178,15 @@ class ReEnrollmentService
             ->where('academic_year_id', $period->from_academic_year_id)
             ->where('status', EnrollmentStatus::Active->value)
             ->whereNull('is_approved')
+            ->count();
+    }
+
+    public function unsyncedOriginEnrollmentsCount(ReEnrollmentPeriod $period): int
+    {
+        return Enrollment::query()
+            ->where('academic_year_id', $period->from_academic_year_id)
+            ->where('status', EnrollmentStatus::Active->value)
+            ->whereNotIn('id', $period->applications()->select('enrollment_id'))
             ->count();
     }
 
@@ -407,6 +419,7 @@ class ReEnrollmentService
 
     public function assertCanPromote(ReEnrollmentPeriod $period): void
     {
+        $this->syncApplications($period);
         $this->assertCanDecide($period);
 
         $pendingGrade = $period->applications()

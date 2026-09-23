@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admission;
 use App\Enums\AdmissionCycleStatus;
 use App\Exceptions\AdmissionConversionException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\BulkInitialReviewPreEnrollmentRequest;
 use App\Http\Requests\ConvertPreEnrollmentToStudentRequest;
 use App\Http\Requests\InitialReviewPreEnrollmentRequest;
 use App\Http\Requests\StorePreEnrollmentRequest;
@@ -44,6 +45,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
             new Middleware('permission:edit admission enrollment')->only([
                 'updateProcess',
                 'initialReview',
+                'bulkInitialReview',
                 'convertToStudent',
             ]),
         ];
@@ -206,6 +208,34 @@ class PreEnrollmentController extends Controller implements HasMiddleware
     }
 
     /**
+     * Accept all pending applications in a cycle: pending → in_review.
+     */
+    public function bulkInitialReview(BulkInitialReviewPreEnrollmentRequest $request)
+    {
+        $cycle = $this->resolveListCycle($request->integer('cycle_id'));
+
+        if (! $cycle) {
+            return response()->json([
+                'success' => false,
+                'message' => __('admissions.no_active_cycle'),
+            ], 404);
+        }
+
+        $result = $this->processService->startInitialReviewBulk(
+            $cycle->id,
+            $request->user()?->id,
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => $result['updated'] > 0
+                ? "Se aceptaron {$result['updated']} solicitud(es). Pasaron a En revisión."
+                : 'No hay solicitudes pendientes por aceptar.',
+            'data' => $result,
+        ]);
+    }
+
+    /**
      * Update only process fields (status, documents_status, payment_status).
      */
     public function updateProcess(UpdatePreEnrollmentProcessRequest $request, PreEnrollment $preEnrollment)
@@ -350,5 +380,17 @@ class PreEnrollmentController extends Controller implements HasMiddleware
             'folio' => $preEnrollment->folio,
 
         ]);
+    }
+
+    private function resolveListCycle(int $cycleId): ?AdmissionCycle
+    {
+        if ($cycleId > 0) {
+            return AdmissionCycle::find($cycleId);
+        }
+
+        return AdmissionCycle::query()
+            ->where('status', AdmissionCycleStatus::ACTIVE)
+            ->first()
+            ?? AdmissionCycle::query()->latest()->first();
     }
 }

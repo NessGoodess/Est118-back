@@ -59,6 +59,29 @@ class PreEnrollmentProcessService
     }
 
     /**
+     * Accept every pending application in a cycle (pending → in_review).
+     *
+     * @return array{updated: int, cycle_id: int}
+     */
+    public function startInitialReviewBulk(int $cycleId, ?int $actorId = null): array
+    {
+        $updated = PreEnrollment::query()
+            ->where('admission_cycle_id', $cycleId)
+            ->where('status', PreEnrollmentStatus::PENDING)
+            ->whereNull('converted_student_id')
+            ->update([
+                'status' => PreEnrollmentStatus::IN_REVIEW,
+                'reviewed_by' => $actorId,
+                'reviewed_at' => now(),
+            ]);
+
+        return [
+            'updated' => $updated,
+            'cycle_id' => $cycleId,
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $data
      */
     public function updateProcess(PreEnrollment $preEnrollment, array $data, ?int $actorId = null): PreEnrollment

@@ -157,6 +157,35 @@ class ReEnrollmentPeriodController extends Controller implements HasMiddleware
         return response()->json(['success' => true, 'data' => $updated]);
     }
 
+    public function syncApplications(ReEnrollmentPeriod $period): JsonResponse
+    {
+        if ($period->status !== ReEnrollmentPeriodStatus::OPEN) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Solo se pueden actualizar alumnos de un periodo abierto.',
+            ], 422);
+        }
+
+        $created = $this->reEnrollmentService->syncApplications($period);
+
+        if ($created > 0) {
+            $this->reEnrollmentService->logEvent($period, ReEnrollmentEventAction::APPLICATIONS_SYNCED, [
+                'created' => $created,
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $created > 0
+                ? "Se agregaron {$created} alumno(s) al periodo."
+                : 'No hay ingresos nuevos por cargar.',
+            'data' => [
+                'created' => $created,
+            ],
+            'stats' => $this->reEnrollmentService->dashboardStats($period),
+        ]);
+    }
+
     public function promote(PromoteReEnrollmentPeriodRequest $request, ReEnrollmentPeriod $period): JsonResponse
     {
         try {

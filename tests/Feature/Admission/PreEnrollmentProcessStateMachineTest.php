@@ -38,6 +38,36 @@ class PreEnrollmentProcessStateMachineTest extends TestCase
         $this->assertNotNull($pre->fresh()->reviewed_at);
     }
 
+    public function test_bulk_initial_review_accepts_all_pending_in_cycle(): void
+    {
+        $user = $this->userWithPermissions('edit admission enrollment');
+        Sanctum::actingAs($user);
+
+        $pendingA = PreEnrollment::factory()->create([
+            'status' => PreEnrollmentStatus::PENDING,
+        ]);
+        $pendingB = PreEnrollment::factory()->create([
+            'status' => PreEnrollmentStatus::PENDING,
+            'admission_cycle_id' => $pendingA->admission_cycle_id,
+        ]);
+        $alreadyReview = PreEnrollment::factory()->create([
+            'status' => PreEnrollmentStatus::IN_REVIEW,
+            'admission_cycle_id' => $pendingA->admission_cycle_id,
+        ]);
+
+        $this->postJson('/api/admissions/pre-enrollments/bulk-initial-review', [
+            'cycle_id' => $pendingA->admission_cycle_id,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.updated', 2);
+
+        $this->assertSame(PreEnrollmentStatus::IN_REVIEW, $pendingA->fresh()->status);
+        $this->assertSame(PreEnrollmentStatus::IN_REVIEW, $pendingB->fresh()->status);
+        $this->assertSame($user->id, $pendingA->fresh()->reviewed_by);
+        $this->assertNotNull($pendingA->fresh()->reviewed_at);
+        $this->assertSame(PreEnrollmentStatus::IN_REVIEW, $alreadyReview->fresh()->status);
+    }
+
     public function test_initial_review_rejects_non_pending(): void
     {
         $user = $this->userWithPermissions('edit admission enrollment');

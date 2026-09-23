@@ -18,7 +18,6 @@ use App\Http\Controllers\Content\GalleryController;
 use App\Http\Controllers\Content\IdentityBannerController;
 use App\Http\Controllers\Content\LegalDocumentController;
 use App\Http\Controllers\Content\MediaUploadController;
-use App\Http\Controllers\EnrollmentPromotionController;
 use App\Http\Controllers\Export\ExportTemplateController;
 use App\Http\Controllers\Export\StudentExportController;
 use App\Http\Controllers\FirstGradeGroupAssignmentController;
@@ -175,6 +174,7 @@ Route::prefix('admissions')->group(function () {
         Route::post('/', [PreEnrollmentController::class, 'storeByAdmin']);
         Route::get('/', [PreEnrollmentController::class, 'index']);
         Route::get('/export', [PreEnrollmentExportController::class, 'export']);
+        Route::post('/bulk-initial-review', [PreEnrollmentController::class, 'bulkInitialReview']);
         Route::get('/{preEnrollment}', [PreEnrollmentController::class, 'show']);
         Route::patch('/{preEnrollment}', [PreEnrollmentController::class, 'update']);
         Route::patch('/{preEnrollment}/process', [PreEnrollmentController::class, 'updateProcess']);
@@ -206,12 +206,7 @@ Route::prefix('admissions')->group(function () {
     Route::get('/academic-years/{academicYear}/first-grade-groups', [FirstGradeGroupsController::class, 'index'])
         ->middleware(['auth:sanctum', 'verified']);
 
-    // Promotion routes
     Route::prefix('enrollments')->middleware(['auth:sanctum', 'verified'])->group(function () {
-        Route::get('/pending-decisions', [EnrollmentPromotionController::class, 'pendingDecisions'])
-            ->middleware('permission:manage admission cycles|manage re-enrollment');
-        Route::patch('/{enrollment}/promotion-decision', [EnrollmentPromotionController::class, 'updateDecision'])
-            ->middleware('permission:manage admission cycles|manage re-enrollment');
         Route::post('/first-grade-group-assignment', [FirstGradeGroupAssignmentController::class, 'assign']);
         Route::post('/first-grade-workshop-assignment', [FirstGradeWorkshopAssignmentController::class, 'assign']);
     });
@@ -257,6 +252,7 @@ Route::prefix('school/re-enrollment')
         Route::get('/periods/{period}/history', [ReEnrollmentPeriodController::class, 'history']);
         Route::post('/periods/{period}/advance-step', [ReEnrollmentPeriodController::class, 'advanceStep']);
         Route::post('/periods/{period}/promote', [ReEnrollmentPeriodController::class, 'promote']);
+        Route::post('/periods/{period}/sync-applications', [ReEnrollmentPeriodController::class, 'syncApplications']);
         Route::post('/periods/{period}/finalize', [ReEnrollmentPeriodController::class, 'finalize']);
 
         Route::get('/periods/{period}/applications', [ReEnrollmentApplicationController::class, 'index']);

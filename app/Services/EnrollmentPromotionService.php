@@ -9,6 +9,7 @@ use App\Enums\WorkshopEnrollmentStatus;
 use App\Models\AcademicYear;
 use App\Models\ClassGroup;
 use App\Models\Enrollment;
+use App\Models\GradeLevel;
 use App\Models\WorkshopEnrollment;
 use App\Models\WorkshopOffering;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +49,8 @@ class EnrollmentPromotionService
                 "No se puede ejecutar la promoción: hay {$pendingDecisions} inscripciones activas sin decisión (is_approved)."
             );
         }
+
+        $this->ensureDestinationGroups($fromYear->id, $toYear->id);
 
         $summary = [
             'from_academic_year_id' => $fromYear->id,
@@ -241,18 +244,61 @@ class EnrollmentPromotionService
         return $rows;
     }
 
-    private function findTargetGroup(int $academicYearId, string $gradeName, string $groupName): ClassGroup
+    /**
+     * Create missing destination groups, including 3°, so retained third-graders
+     * can repeat and approved second-graders have a 3° seat.
+     */
+    private function ensureDestinationGroups(int $fromAcademicYearId, int $toAcademicYearId): void
     {
-        return ClassGroup::query()
+        $sourceGroups = ClassGroup::query()
+            ->with('gradeLevel:id,name')
+            ->where('academic_year_id', $fromAcademicYearId)
+            ->get();
+
+        foreach ($sourceGroups as $source) {
+            $gradeName = $source->gradeLevel?->name;
+            if (! is_string($gradeName) || $gradeName === '') {
+                continue;
+            }
+
+            $this->ensureGroup($toAcademicYearId, $gradeName, $source->name);
+
+            if ($gradeName === '1°') {
+                $this->ensureGroup($toAcademicYearId, '2°', $source->name);
+            } elseif ($gradeName === '2°') {
+                $this->ensureGroup($toAcademicYearId, '3°', $source->name);
+            }
+        }
+    }
+
+    private function ensureGroup(int $academicYearId, string $gradeName, string $groupName): ClassGroup
+    {
+        $existing = ClassGroup::query()
             ->where('academic_year_id', $academicYearId)
             ->where('name', $groupName)
             ->whereHas('gradeLevel', function ($query) use ($gradeName): void {
                 $query->where('name', $gradeName);
             })
-            ->firstOr(function () use ($academicYearId, $gradeName, $groupName) {
-                throw new RuntimeException(
-                    "No existe grupo destino {$gradeName}{$groupName} en ciclo {$academicYearId}."
-                );
-            });
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $grade = GradeLevel::query()->where('name', $gradeName)->first();
+        if (! $grade) {
+            throw new RuntimeException("No existe el grado {$gradeName} para crear grupos destino.");
+        }
+
+        return ClassGroup::create([
+            'academic_year_id' => $academicYearId,
+            'grade_level_id' => $grade->id,
+            'name' => $groupName,
+        ]);
+    }
+
+    private function findTargetGroup(int $academicYearId, string $gradeName, string $groupName): ClassGroup
+    {
+        return $this->ensureGroup($academicYearId, $gradeName, $groupName);
     }
 }

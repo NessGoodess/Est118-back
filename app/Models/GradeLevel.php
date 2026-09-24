@@ -35,4 +35,9 @@ class GradeLevel extends Model
     {
         return $this->hasMany(Schedule::class);
     }
+
+    public function cardDesigns(): HasMany
+    {
+        return $this->hasMany(CardDesign::class);
+    }
 }

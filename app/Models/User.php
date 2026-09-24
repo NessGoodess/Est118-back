@@ -122,4 +122,9 @@ class User extends Authenticatable
         return (int) $schedule->teacher_id === $teacherId
             || (int) ($schedule->schoolClass?->teacher_id ?? 0) === $teacherId;
     }
+
+    public function cardDesigns(): HasMany
+    {
+        return $this->hasMany(CardDesign::class);
+    }
 }

@@ -13,12 +13,37 @@ class CreateServiceToken extends Command
                             {--ability= : Token ability}
                             {--name= : Token name}
                             {--revoke : Revoke previous tokens with the same name}
-                            {--default : Create default NFC service token}';
+                            {--default : Create default NFC service token}
+                            {--print-agent : Create default ZC300 print-agent token}';
 
-    protected $description = 'Create a service token for external integrations (e.g., NFC reader)';
+    protected $description = 'Create a service token for external integrations (e.g., NFC reader, ZC300 agent)';
 
     public function handle(): int
     {
+        if ($this->option('print-agent')) {
+            $user = User::where('email', 'print-agent@est118.edu.mx')->first();
+
+            if (! $user) {
+                $this->error('Print agent service user not found. Run the ServiceUserSeeder first.');
+
+                return self::FAILURE;
+            }
+
+            $tokenName = 'zc300-print-agent';
+            $ability = ServiceAbility::PRINT_AGENT->value;
+            $count = $user->tokens()->where('name', $tokenName)->delete();
+            $this->info("Revoked {$count} previous print-agent token(s).");
+
+            $token = $user->createToken($tokenName, [$ability]);
+
+            $this->newLine();
+            $this->info('ZC300 print-agent token created successfully');
+            $this->line('<fg=green>'.$token->plainTextToken.'</>');
+            $this->newLine();
+
+            return self::SUCCESS;
+        }
+
         // --- Default Mode ---
         if ($this->option('default')) {
             $user = User::where('email', 'nfc-service@est118.edu.mx')->first();

@@ -5,6 +5,7 @@ namespace App\Enums;
 enum ServiceAbility: string
 {
     case NFC_READER = 'service-nfc-reader';
+    case PRINT_AGENT = 'service-zc300-print';
 
     /**
      * All abilities as strings

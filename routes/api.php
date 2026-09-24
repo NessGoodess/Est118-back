@@ -33,6 +33,10 @@ use App\Http\Controllers\School\ReEnrollmentApplicationController;
 use App\Http\Controllers\School\ReEnrollmentPeriodController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\StudentCredentialPrintingController;
+use App\Http\Controllers\Print\CardTemplateController;
+use App\Http\Controllers\Print\PrintAgentController;
+use App\Http\Controllers\Print\PrintJobController;
+use App\Http\Controllers\Print\Zc300AgentDownloadController;
 use App\Http\Controllers\students\GradeLevelController;
 use App\Http\Controllers\students\PrivateImageController;
 use App\Http\Controllers\TelegramController;
@@ -107,6 +111,77 @@ Route::prefix('reader')->group(function () {
         Route::post('/slots/cancel-pairing', [NfcReaderSlotController::class, 'cancelPairing']);
         Route::post('/slots/arm-all', [NfcReaderSlotController::class, 'armAll']);
     });
+});
+
+/**
+ * ZC300 print agent (service token) + admin print jobs
+ * ___________________________________________________________________________
+ */
+Route::prefix('agent')->middleware([
+    'auth:sanctum',
+    'service.token:'.ServiceAbility::PRINT_AGENT->value,
+])->group(function () {
+    Route::post('/print/heartbeat', [PrintAgentController::class, 'heartbeat']);
+    Route::get('/print-jobs/stats', [PrintAgentController::class, 'queueStats']);
+    Route::get('/print-jobs/next', [PrintAgentController::class, 'next']);
+    Route::post('/print-jobs/{printJob}/claim', [PrintAgentController::class, 'claim']);
+    Route::post('/print-jobs/{printJob}/complete', [PrintAgentController::class, 'complete']);
+    Route::post('/print-jobs/{printJob}/fail', [PrintAgentController::class, 'fail']);
+    Route::get('/print-jobs/{printJob}/assets/front', [PrintAgentController::class, 'frontAsset']);
+    Route::get('/print-jobs/{printJob}/assets/back', [PrintAgentController::class, 'backAsset']);
+});
+
+Route::middleware(['auth:sanctum', 'verified'])->group(function () {
+    Route::get('/print-jobs', [PrintJobController::class, 'index'])
+        ->middleware('permission:view students');
+    Route::get('/print-jobs/latest-by-students', [PrintJobController::class, 'latestByStudents'])
+        ->middleware('permission:view students');
+    Route::get('/print-jobs/preview', [PrintJobController::class, 'preview'])
+        ->middleware('permission:view students');
+    Route::get('/print-jobs/queue', [PrintJobController::class, 'queue'])
+        ->middleware('permission:view students');
+    Route::post('/print-jobs/resolve', [PrintJobController::class, 'resolve'])
+        ->middleware('permission:view students');
+    Route::post('/print-jobs/cancel-queue', [PrintJobController::class, 'cancelQueue'])
+        ->middleware('permission:edit students');
+    Route::post('/print-jobs/resume', [PrintJobController::class, 'resume'])
+        ->middleware('permission:edit students');
+    Route::post('/print-jobs', [PrintJobController::class, 'store'])
+        ->middleware('permission:edit students');
+    Route::get('/print-jobs/{printJob}', [PrintJobController::class, 'show'])
+        ->middleware('permission:view students');
+    Route::post('/print-jobs/{printJob}/cancel', [PrintJobController::class, 'cancel'])
+        ->middleware('permission:edit students');
+    Route::get('/print-agent/status', [PrintJobController::class, 'agentStatus'])
+        ->middleware('permission:view students');
+    Route::post('/print-agent/token', [PrintJobController::class, 'issueAgentToken'])
+        ->middleware('role:admin');
+
+    Route::get('/card-templates', [CardTemplateController::class, 'index'])
+        ->middleware('permission:view students');
+    Route::post('/card-templates', [CardTemplateController::class, 'store'])
+        ->middleware('permission:edit students');
+    Route::get('/card-templates/{template}', [CardTemplateController::class, 'show'])
+        ->middleware('permission:view students');
+    Route::put('/card-templates/{template}', [CardTemplateController::class, 'update'])
+        ->middleware('permission:edit students');
+    Route::delete('/card-templates/{template}', [CardTemplateController::class, 'destroy'])
+        ->middleware('permission:edit students');
+    Route::post('/card-templates/{template}/background', [CardTemplateController::class, 'uploadBackground'])
+        ->middleware('permission:edit students');
+    Route::delete('/card-templates/{template}/background', [CardTemplateController::class, 'deleteBackground'])
+        ->middleware('permission:edit students');
+    Route::get('/card-templates/{template}/background', [CardTemplateController::class, 'background'])
+        ->middleware('permission:view students');
+    Route::post('/card-templates/{template}/assets', [CardTemplateController::class, 'uploadAsset'])
+        ->middleware('permission:edit students');
+    Route::get('/card-templates/{template}/assets/{filename}', [CardTemplateController::class, 'asset'])
+        ->middleware('permission:view students');
+
+    Route::get('/downloads/zc300-agent/latest', [Zc300AgentDownloadController::class, 'latest'])
+        ->middleware('permission:view students');
+    Route::get('/downloads/zc300-agent/file', [Zc300AgentDownloadController::class, 'file'])
+        ->middleware('permission:view students');
 });
 
 /**

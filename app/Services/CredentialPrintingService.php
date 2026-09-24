@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\WorkshopEnrollmentStatus;
+use App\Models\AcademicYear;
 use App\Models\Address;
 use App\Models\ClassGroup;
 use App\Models\Enrollment;
@@ -34,8 +35,14 @@ class CredentialPrintingService
      */
     public function classGroupsForGrade(int $gradeId): array
     {
+        $yearId = AcademicYear::query()->where('is_active', true)->value('id');
+        if (! $yearId) {
+            return [];
+        }
+
         return ClassGroup::query()
             ->where('grade_level_id', $gradeId)
+            ->where('academic_year_id', $yearId)
             ->with(['gradeLevel:id,name', 'academicYear:id,description'])
             ->withCount([
                 'enrollments as active_students_count' => function ($q) {
@@ -56,7 +63,7 @@ class CredentialPrintingService
                     'grade_name' => $grade,
                     'academic_year_id' => $cg->academic_year_id,
                     'academic_year' => $year,
-                    'label' => trim($grade.' — Grupo '.$cg->name.($year ? ' ('.$year.')' : '')),
+                    'label' => trim('Grupo '.$cg->name),
                     'active_students_count' => (int) $cg->active_students_count,
                 ];
             })
@@ -198,9 +205,9 @@ class CredentialPrintingService
             $address->neighborhood_name
                 ? trim(($address->neighborhood_type ?? '').' '.$address->neighborhood_name)
                 : null,
-            $address->postal_code ? 'C.P. '.$address->postal_code : null,
+            /*$address->postal_code ? 'C.P. '.$address->postal_code : null,
             $address->city,
-            $address->state,
+            $address->state,*/
         ]);
 
         return implode(', ', $parts);

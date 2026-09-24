@@ -8,6 +8,7 @@
     "require": {
         "php": "^8.2",
         "barryvdh/laravel-dompdf": "^3.1",
+        "endroid/qr-code": "5.0",
         "intervention/image": "^3.11",
         "irazasyed/telegram-bot-sdk": "^3.15",
         "laravel/breeze": "^2.3",

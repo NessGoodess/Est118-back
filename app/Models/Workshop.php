@@ -12,17 +12,21 @@ class Workshop extends Model
     /** @use HasFactory<\Database\Factories\WorkshopFactory> */
     use HasFactory;
 
+    public const OFIMATICA_CODE = 'OFIMATICA';
+
     protected $fillable = [
         'name',
         'code',
         'description',
         'is_active',
+        'is_internal',
     ];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'is_internal' => 'boolean',
         ];
     }
 

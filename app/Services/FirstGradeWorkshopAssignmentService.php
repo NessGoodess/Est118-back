@@ -62,7 +62,13 @@ class FirstGradeWorkshopAssignmentService
 
         $workshopsById = Workshop::query()->where('is_active', true)->get()->keyBy('id');
         $workshopsByName = [];
+        $internalLast = null;
         foreach ($workshopsById as $workshop) {
+            if ($workshop->code === Workshop::OFIMATICA_CODE && $workshop->is_internal) {
+                $internalLast = $workshop;
+
+                continue;
+            }
             $workshopsByName[AdmissionWorkshop::normalize($workshop->name)] = $workshop;
         }
 
@@ -170,6 +176,11 @@ class FirstGradeWorkshopAssignmentService
                     $source = WorkshopEnrollmentSource::SecondChoice;
                     $occupied[$second->id] = ($occupied[$second->id] ?? 0) + 1;
                     $flags[] = 'second_choice_used';
+                } elseif ($internalLast) {
+                    $workshopId = $internalLast->id;
+                    $source = WorkshopEnrollmentSource::Leftover;
+                    $status = WorkshopEnrollmentStatus::Assigned;
+                    $flags[] = 'internal_last_option';
                 } else {
                     $workshopId = $first?->id ?? $second?->id;
                     $source = WorkshopEnrollmentSource::Leftover;

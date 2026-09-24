@@ -19,9 +19,20 @@ class WorkshopSeeder extends Seeder
                     'name' => $workshop->value,
                     'description' => null,
                     'is_active' => true,
+                    'is_internal' => false,
                 ]
             );
         }
+
+        Workshop::query()->updateOrCreate(
+            ['code' => Workshop::OFIMATICA_CODE],
+            [
+                'name' => 'Ofimática',
+                'description' => 'Taller interno. No se ofrece en la preinscripción; es la última opción de asignación.',
+                'is_active' => true,
+                'is_internal' => true,
+            ]
+        );
 
         $year = AcademicYear::query()->where('is_active', true)->first()
             ?? AcademicYear::query()->orderByDesc('id')->first();
@@ -38,7 +49,7 @@ class WorkshopSeeder extends Seeder
                 ],
                 [
                     'capacity' => null,
-                    'is_open_for_intake' => true,
+                    'is_open_for_intake' => ! $row->is_internal,
                 ]
             );
         }

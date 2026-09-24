@@ -85,6 +85,7 @@ class WorkshopDomainTest extends TestCase
 
     public function test_lote_waitlists_when_both_choices_are_full(): void
     {
+        Workshop::query()->where('code', Workshop::OFIMATICA_CODE)->update(['is_active' => false]);
         [$year, $group] = $this->seedYearAndFirstGroup();
         $this->seedWorkshops($year, 1);
 
@@ -99,6 +100,36 @@ class WorkshopDomainTest extends TestCase
         $this->assertSame('waitlisted', $row['status']);
         $this->assertSame(
             WorkshopEnrollmentStatus::Waitlisted,
+            WorkshopEnrollment::query()->where('student_id', $third->student_id)->first()?->status
+        );
+    }
+
+    public function test_lote_assigns_ofimatica_as_internal_last_option(): void
+    {
+        [$year, $group] = $this->seedYearAndFirstGroup();
+        $this->seedWorkshops($year, 1);
+        $ofimatica = Workshop::query()->updateOrCreate(
+            ['code' => Workshop::OFIMATICA_CODE],
+            [
+                'name' => 'Ofimática',
+                'is_active' => true,
+                'is_internal' => true,
+            ]
+        );
+
+        $this->makeFirstCandidate($year, $group, 'A1', AdmissionWorkshop::Informatics->value, AdmissionWorkshop::IndustrialDesign->value, 10);
+        $this->makeFirstCandidate($year, $group, 'A2', AdmissionWorkshop::IndustrialDesign->value, AdmissionWorkshop::Informatics->value, 9);
+        $third = $this->makeFirstCandidate($year, $group, 'A3', AdmissionWorkshop::Informatics->value, AdmissionWorkshop::IndustrialDesign->value, 8);
+
+        $result = app(FirstGradeWorkshopAssignmentService::class)->run($year->id, dryRun: false);
+
+        $row = collect($result['assignments'])->firstWhere('student_id', $third->student_id);
+        $this->assertContains('internal_last_option', $row['flags']);
+        $this->assertSame('assigned', $row['status']);
+        $this->assertSame('leftover', $row['source']);
+        $this->assertSame($ofimatica->id, $row['workshop_id']);
+        $this->assertSame(
+            WorkshopEnrollmentStatus::Assigned,
             WorkshopEnrollment::query()->where('student_id', $third->student_id)->first()?->status
         );
     }

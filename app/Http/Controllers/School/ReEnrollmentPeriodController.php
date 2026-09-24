@@ -188,22 +188,33 @@ class ReEnrollmentPeriodController extends Controller implements HasMiddleware
 
     public function promote(PromoteReEnrollmentPeriodRequest $request, ReEnrollmentPeriod $period): JsonResponse
     {
+        $alreadyExecuted = $period->promotion_executed_at !== null;
+        $dryRun = (bool) $request->boolean('dry_run', false);
+
         try {
-            $summary = $this->reEnrollmentService->promotePeriod(
-                $period,
-                (bool) $request->boolean('dry_run', false)
-            );
+            $summary = $this->reEnrollmentService->promotePeriod($period, $dryRun);
         } catch (RuntimeException $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }
 
         return response()->json([
             'success' => true,
-            'message' => $request->boolean('dry_run') ? 'Simulación completada.' : 'Promoción ejecutada.',
+            'message' => $this->promoteMessage($alreadyExecuted, $dryRun),
             'data' => $summary,
             'period' => $period->fresh(),
             'stats' => $this->reEnrollmentService->dashboardStats($period),
         ]);
+    }
+
+    private function promoteMessage(bool $alreadyExecuted, bool $dryRun): string
+    {
+        if ($dryRun) {
+            return 'Simulación completada.';
+        }
+
+        return $alreadyExecuted
+            ? 'Colocación tardía ejecutada.'
+            : 'Promoción ejecutada.';
     }
 
     public function finalize(FinalizeReEnrollmentPeriodRequest $request, ReEnrollmentPeriod $period): JsonResponse

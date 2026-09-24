@@ -84,7 +84,7 @@ class ReEnrollmentBulkValidateTest extends TestCase
         $this->assertNull($pending->enrollment->fresh()->is_approved);
     }
 
-    public function test_reject_marks_application_and_clears_enrollment_decision(): void
+    public function test_reject_confirms_dropout_without_marking_as_failed(): void
     {
         [$user, $period, $pending] = $this->openPeriodWithApplications();
         Sanctum::actingAs($user);
@@ -96,11 +96,12 @@ class ReEnrollmentBulkValidateTest extends TestCase
 
         $pending->refresh();
         $this->assertSame(ReEnrollmentValidationStatus::REJECTED, $pending->status);
-        $this->assertFalse($pending->passed_cycle);
-        $this->assertFalse($pending->enrollment->fresh()->is_approved);
+        $this->assertNull($pending->passed_cycle);
+        $this->assertNull($pending->enrollment->fresh()->is_approved);
+        $this->assertSame(EnrollmentStatus::Dropped, $pending->enrollment->fresh()->status);
     }
 
-    public function test_bulk_decide_requires_admin_validation_first(): void
+    public function test_bulk_decide_does_not_require_admin_validation(): void
     {
         [$user, $period, $pending] = $this->openPeriodWithApplications();
         Sanctum::actingAs($user);
@@ -108,7 +109,12 @@ class ReEnrollmentBulkValidateTest extends TestCase
         $this->postJson("/api/school/re-enrollment/periods/{$period->id}/applications/bulk-decide", [
             'ids' => [$pending->id],
             'is_approved' => true,
-        ])->assertStatus(422);
+        ])->assertOk();
+
+        $pending->refresh();
+        $this->assertTrue($pending->passed_cycle);
+        $this->assertTrue($pending->enrollment->fresh()->is_approved);
+        $this->assertSame(ReEnrollmentValidationStatus::PENDING, $pending->status);
     }
 
     public function test_bulk_decide_approves_validated_students(): void
@@ -256,7 +262,7 @@ class ReEnrollmentBulkValidateTest extends TestCase
             'class_group_id' => $group->id,
             'academic_year_id' => $year->id,
             'status' => EnrollmentStatus::Active,
-            'is_approved' => $status === ReEnrollmentValidationStatus::REJECTED ? false : null,
+            'is_approved' => null,
         ]);
 
         return ReEnrollmentApplication::create([

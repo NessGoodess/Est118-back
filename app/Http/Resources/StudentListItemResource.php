@@ -16,13 +16,18 @@ class StudentListItemResource extends JsonResource
     {
         /** @var \App\Models\Student $student */
         $student = $this->resource;
-        $enrollment = $student->enrollments->where('status', 'active')->first()
-            ?? $student->enrollments->first();
+        $enrollment = $student->enrollments->first(
+            fn ($row) => ($row->status?->value ?? $row->status) === 'active'
+        ) ?? $student->enrollments->first();
         $photos = app(StudentPhotoPathService::class);
 
         $grade = optional($enrollment?->classGroup?->gradeLevel)?->name ?? 'N/A';
         $group = optional($enrollment?->classGroup)?->name ?? 'N/A';
         $year = $enrollment?->classGroup?->academicYear;
+        $enrollmentStatus = $enrollment?->status;
+        $enrollmentStatusValue = $enrollmentStatus instanceof \BackedEnum
+            ? $enrollmentStatus->value
+            : $enrollmentStatus;
 
         return [
             'id' => $student->id,
@@ -33,6 +38,7 @@ class StudentListItemResource extends JsonResource
             'phone' => $student->profile?->phone_number,
             'grade_level' => $grade,
             'class_group' => $group,
+            'enrollment_status' => $enrollmentStatusValue,
             /** @compat index payload */
             'current_grade' => $grade,
             'current_group' => $group,

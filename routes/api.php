@@ -333,6 +333,8 @@ Route::prefix('school/re-enrollment')
         Route::get('/periods/{period}/applications', [ReEnrollmentApplicationController::class, 'index']);
         Route::post('/periods/{period}/applications/bulk-validate', [ReEnrollmentApplicationController::class, 'bulkValidate']);
         Route::post('/periods/{period}/applications/bulk-decide', [ReEnrollmentApplicationController::class, 'bulkDecide']);
+        Route::post('/periods/{period}/applications/{application}/confirm-presence', [ReEnrollmentApplicationController::class, 'confirmPresence']);
+        Route::post('/periods/{period}/applications/{application}/confirm-dropout', [ReEnrollmentApplicationController::class, 'confirmDropout']);
         Route::patch('/periods/{period}/applications/{application}', [ReEnrollmentApplicationController::class, 'update']);
     });
 

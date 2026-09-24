@@ -65,24 +65,22 @@ class ReEnrollmentService
             ->where(fn ($q) => $q->where('no_debts', false)->orWhereNull('no_debts'))
             ->count();
         $pendingGradeDecisions = (clone $applications)
-            ->where('status', ReEnrollmentValidationStatus::VALIDATED)
+            ->where('status', '!=', ReEnrollmentValidationStatus::REJECTED->value)
             ->whereNull('passed_cycle')
             ->count();
-        $readyForPromotion = (clone $applications)
-            ->where('status', ReEnrollmentValidationStatus::VALIDATED)
-            ->whereNotNull('passed_cycle')
-            ->count();
+        $readyForPromotion = $this->decidedActiveOriginCount($period);
         $unresolved = $pending + $inReview;
         $missingEnrollmentDecisions = $this->missingOriginEnrollmentDecisions($period);
         $unsyncedEnrollments = $this->unsyncedOriginEnrollmentsCount($period);
+        $waitingActivation = $this->waitingActivationCount($period);
         $canAccessPromotion = $this->canAccessStep($period, ReEnrollmentProcessStep::PROMOTION);
-        $canDecide = $canAccessPromotion
-            && $unresolved === 0
-            && $period->promotion_executed_at === null;
+        $canDecide = $canAccessPromotion && $period->status === ReEnrollmentPeriodStatus::OPEN;
         $canPromote = $canDecide
-            && $pendingGradeDecisions === 0
-            && $missingEnrollmentDecisions === 0
-            && $unsyncedEnrollments === 0;
+            && $period->promotion_executed_at === null
+            && $readyForPromotion > 0;
+        $canPlaceLate = $canDecide
+            && $period->promotion_executed_at !== null
+            && $readyForPromotion > 0;
 
         $resolved = $validated + $rejected;
         $percent = $total > 0 ? (int) round(($resolved / $total) * 100) : 0;
@@ -97,7 +95,8 @@ class ReEnrollmentService
             'can_validate' => $this->canAccessStep($period, ReEnrollmentProcessStep::VALIDATION),
             'can_decide' => $canDecide,
             'can_promote' => $canPromote,
-            'can_simulate_promotion' => $canPromote,
+            'can_place_late' => $canPlaceLate,
+            'can_simulate_promotion' => $canPromote || $canPlaceLate,
             'can_finalize' => $period->promotion_executed_at !== null && $period->status === ReEnrollmentPeriodStatus::OPEN,
             'total_students' => $total,
             'validated' => $validated,
@@ -108,6 +107,8 @@ class ReEnrollmentService
             'pending_grade_decisions' => $pendingGradeDecisions,
             'missing_enrollment_decisions' => $missingEnrollmentDecisions,
             'unsynced_enrollments' => $unsyncedEnrollments,
+            'waiting_activation' => $waitingActivation,
+            'not_promoted_yet' => $missingEnrollmentDecisions,
             'with_debts' => $withDebts,
             'ready_for_promotion' => $readyForPromotion,
             'progress_percent' => $percent,
@@ -187,6 +188,26 @@ class ReEnrollmentService
             ->where('academic_year_id', $period->from_academic_year_id)
             ->where('status', EnrollmentStatus::Active->value)
             ->whereNotIn('id', $period->applications()->select('enrollment_id'))
+            ->count();
+    }
+
+    public function decidedActiveOriginCount(ReEnrollmentPeriod $period): int
+    {
+        return Enrollment::query()
+            ->where('academic_year_id', $period->from_academic_year_id)
+            ->where('status', EnrollmentStatus::Active->value)
+            ->whereNotNull('is_approved')
+            ->count();
+    }
+
+    public function waitingActivationCount(ReEnrollmentPeriod $period): int
+    {
+        $studentIds = $period->applications()->select('student_id');
+
+        return Enrollment::query()
+            ->where('academic_year_id', $period->to_academic_year_id)
+            ->where('status', EnrollmentStatus::PreEnrolled->value)
+            ->whereIn('student_id', $studentIds)
             ->count();
     }
 
@@ -302,34 +323,124 @@ class ReEnrollmentService
         }
 
         $application->update(['status' => ReEnrollmentValidationStatus::VALIDATED]);
+        $this->activateWaitingDestination($application->fresh() ?? $application);
     }
 
     public function applyGradeDecision(ReEnrollmentApplication $application, bool $approved): void
     {
         if ($application->status === ReEnrollmentValidationStatus::REJECTED) {
-            throw new RuntimeException('No se puede decidir una solicitud rechazada.');
+            throw new RuntimeException('No se puede decidir una solicitud rechazada o dada de baja.');
         }
 
-        if ($application->status !== ReEnrollmentValidationStatus::VALIDATED) {
-            throw new RuntimeException('Valida adeudos, datos y documentos antes de aprobar o reprobar.');
+        $origin = $application->enrollment;
+        if ($origin && $origin->status === EnrollmentStatus::Completed) {
+            throw new RuntimeException('Este alumno ya fue promovido. La decisión de grado no se puede cambiar.');
         }
 
         $application->update(['passed_cycle' => $approved]);
 
-        if ($application->enrollment) {
-            $application->enrollment->update(['is_approved' => $approved]);
+        if ($origin) {
+            $origin->update(['is_approved' => $approved]);
         }
+    }
+
+    public function confirmPresence(ReEnrollmentApplication $application): Enrollment
+    {
+        $period = $application->period;
+        if (! $period) {
+            $application->loadMissing('period');
+            $period = $application->period;
+        }
+
+        if (! $period) {
+            throw new RuntimeException('La solicitud no tiene periodo.');
+        }
+
+        $this->assertCanValidate($period);
+
+        $dest = $this->destinationEnrollment($application, $period);
+        if (! $dest) {
+            throw new RuntimeException('Aún no hay inscripción en el ciclo destino. Colócalo en Promoción.');
+        }
+
+        if ($dest->status === EnrollmentStatus::Dropped) {
+            throw new RuntimeException('Esta inscripción ya fue dada de baja.');
+        }
+
+        if ($dest->status === EnrollmentStatus::PreEnrolled) {
+            $dest->update(['status' => EnrollmentStatus::Active]);
+            $this->logEvent($period, ReEnrollmentEventAction::PRESENCE_CONFIRMED, [
+                'application_id' => $application->id,
+                'enrollment_id' => $dest->id,
+            ]);
+        }
+
+        return $dest->fresh() ?? $dest;
+    }
+
+    public function confirmDropout(ReEnrollmentApplication $application): void
+    {
+        $period = $application->period ?? $application->loadMissing('period')->period;
+        if (! $period) {
+            throw new RuntimeException('La solicitud no tiene periodo.');
+        }
+
+        $this->assertCanValidate($period);
+
+        $application->update([
+            'status' => ReEnrollmentValidationStatus::REJECTED,
+        ]);
+
+        $origin = $application->enrollment;
+        if ($origin && in_array($origin->status, [EnrollmentStatus::Active, EnrollmentStatus::PreEnrolled], true)) {
+            $origin->update(['status' => EnrollmentStatus::Dropped]);
+        }
+
+        $dest = $this->destinationEnrollment($application, $period);
+        if ($dest && in_array($dest->status, [EnrollmentStatus::Active, EnrollmentStatus::PreEnrolled], true)) {
+            $dest->update(['status' => EnrollmentStatus::Dropped]);
+        }
+
+        $this->logEvent($period, ReEnrollmentEventAction::DROPOUT_CONFIRMED, [
+            'application_id' => $application->id,
+            'student_id' => $application->student_id,
+        ]);
     }
 
     public function rejectApplication(ReEnrollmentApplication $application): void
     {
-        $application->update([
-            'status' => ReEnrollmentValidationStatus::REJECTED,
-            'passed_cycle' => false,
-        ]);
+        $this->confirmDropout($application);
+    }
 
-        if ($application->enrollment) {
-            $application->enrollment->update(['is_approved' => false]);
+    public function destinationEnrollment(
+        ReEnrollmentApplication $application,
+        ?ReEnrollmentPeriod $period = null
+    ): ?Enrollment {
+        $period ??= $application->period ?? $application->loadMissing('period')->period;
+        if (! $period) {
+            return null;
+        }
+
+        return Enrollment::query()
+            ->where('student_id', $application->student_id)
+            ->where('academic_year_id', $period->to_academic_year_id)
+            ->latest('id')
+            ->first();
+    }
+
+    public function activateWaitingDestination(ReEnrollmentApplication $application): void
+    {
+        $period = $application->period ?? $application->loadMissing('period')->period;
+        $dest = $this->destinationEnrollment($application, $period);
+        if ($dest && $dest->status === EnrollmentStatus::PreEnrolled) {
+            $dest->update(['status' => EnrollmentStatus::Active]);
+            if ($period) {
+                $this->logEvent($period, ReEnrollmentEventAction::PRESENCE_CONFIRMED, [
+                    'application_id' => $application->id,
+                    'enrollment_id' => $dest->id,
+                    'via' => 'checklist',
+                ]);
+            }
         }
     }
 
@@ -375,7 +486,13 @@ class ReEnrollmentService
                     continue;
                 }
 
-                if ($application->status !== ReEnrollmentValidationStatus::VALIDATED) {
+                if ($application->status === ReEnrollmentValidationStatus::REJECTED) {
+                    $skipped++;
+                    continue;
+                }
+
+                $origin = $application->enrollment;
+                if ($origin && $origin->status === EnrollmentStatus::Completed) {
                     $skipped++;
                     continue;
                 }
@@ -406,15 +523,6 @@ class ReEnrollmentService
     {
         $this->assertCanValidate($period);
         $this->assertStepAccess($period, ReEnrollmentProcessStep::PROMOTION);
-
-        $unresolved = $this->unresolvedCount($period);
-        if ($unresolved > 0) {
-            throw new RuntimeException("Hay {$unresolved} alumnos sin validación administrativa. Completa validación antes de decidir.");
-        }
-
-        if ($period->promotion_executed_at !== null) {
-            throw new RuntimeException('La promoción ya se ejecutó. Solo consulta.');
-        }
     }
 
     public function assertCanPromote(ReEnrollmentPeriod $period): void
@@ -422,18 +530,21 @@ class ReEnrollmentService
         $this->syncApplications($period);
         $this->assertCanDecide($period);
 
-        $pendingGrade = $period->applications()
-            ->where('status', ReEnrollmentValidationStatus::VALIDATED)
-            ->whereNull('passed_cycle')
-            ->count();
+        if ($this->decidedActiveOriginCount($period) === 0) {
+            throw new RuntimeException('No hay alumnos con decisión de grado para promover. Aprueba o reprueba al menos uno.');
+        }
+    }
 
-        if ($pendingGrade > 0) {
-            throw new RuntimeException("Hay {$pendingGrade} alumnos validados sin aprobar o reprobar.");
+    public function assertCanPlaceLate(ReEnrollmentPeriod $period): void
+    {
+        $this->assertCanDecide($period);
+
+        if ($period->promotion_executed_at === null) {
+            throw new RuntimeException('Primero ejecuta la promoción del lote principal.');
         }
 
-        $missing = $this->missingOriginEnrollmentDecisions($period);
-        if ($missing > 0) {
-            throw new RuntimeException("Hay {$missing} inscripciones activas del ciclo origen sin decisión (is_approved).");
+        if ($this->decidedActiveOriginCount($period) === 0) {
+            throw new RuntimeException('No hay alumnos pendientes de colocar con decisión de grado.');
         }
     }
 
@@ -464,25 +575,50 @@ class ReEnrollmentService
 
     public function promotePeriod(ReEnrollmentPeriod $period, bool $dryRun = false): array
     {
-        $this->assertCanPromote($period);
+        $alreadyExecuted = $period->promotion_executed_at !== null;
+
+        if ($alreadyExecuted) {
+            $this->syncApplications($period);
+            $this->assertCanPlaceLate($period);
+        } else {
+            $this->assertCanPromote($period);
+        }
+
+        $applications = $period->applications()->get()->keyBy('enrollment_id');
 
         $summary = $this->promotionService->promote(
             $period->from_academic_year_id,
             $period->to_academic_year_id,
-            $dryRun
+            $dryRun,
+            function (Enrollment $enrollment) use ($applications): EnrollmentStatus {
+                $application = $applications->get($enrollment->id);
+                if (
+                    $application
+                    && $application->isChecklistComplete()
+                    && $application->status === ReEnrollmentValidationStatus::VALIDATED
+                ) {
+                    return EnrollmentStatus::Active;
+                }
+
+                return EnrollmentStatus::PreEnrolled;
+            }
         );
 
         if (! $dryRun) {
-            $period->update([
-                'promotion_executed_at' => now(),
-                'promotion_executed_by' => Auth::id(),
-                'last_promotion_summary' => $summary,
-                'current_step' => $period->keep_current_groups
-                    ? ReEnrollmentProcessStep::COMPLETED
-                    : ReEnrollmentProcessStep::GROUPS,
-            ]);
-
-            $this->logEvent($period, ReEnrollmentEventAction::PROMOTION_EXECUTED, $summary);
+            if (! $alreadyExecuted) {
+                $period->update([
+                    'promotion_executed_at' => now(),
+                    'promotion_executed_by' => Auth::id(),
+                    'last_promotion_summary' => $summary,
+                    'current_step' => $period->keep_current_groups
+                        ? ReEnrollmentProcessStep::COMPLETED
+                        : ReEnrollmentProcessStep::GROUPS,
+                ]);
+                $this->logEvent($period, ReEnrollmentEventAction::PROMOTION_EXECUTED, $summary);
+            } else {
+                $period->update(['last_promotion_summary' => $summary]);
+                $this->logEvent($period, ReEnrollmentEventAction::LATE_PLACED, $summary);
+            }
         } else {
             $this->logEvent($period, ReEnrollmentEventAction::PROMOTION_DRY_RUN, $summary);
         }
@@ -494,14 +630,6 @@ class ReEnrollmentService
     {
         if ($period->status === ReEnrollmentPeriodStatus::FINALIZED) {
             throw new RuntimeException('El proceso ya está finalizado.');
-        }
-
-        if ($step === ReEnrollmentProcessStep::PROMOTION) {
-            $unresolved = $this->unresolvedCount($period);
-
-            if ($unresolved > 0) {
-                throw new RuntimeException("No puedes avanzar a promoción: {$unresolved} alumnos pendientes de validación.");
-            }
         }
 
         $period->update(['current_step' => $step]);

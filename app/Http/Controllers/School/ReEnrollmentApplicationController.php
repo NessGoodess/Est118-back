@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\School;
 
+use App\Enums\EnrollmentStatus;
 use App\Enums\ReEnrollmentValidationStatus;
 use App\Http\Controllers\Controller;
+use App\Models\Enrollment;
 use App\Http\Requests\School\BulkDecideReEnrollmentApplicationsRequest;
 use App\Http\Requests\School\BulkValidateReEnrollmentApplicationsRequest;
 use App\Http\Requests\School\UpdateReEnrollmentApplicationRequest;
@@ -51,28 +53,17 @@ class ReEnrollmentApplicationController extends Controller implements HasMiddlew
             $query->whereHas('enrollment.classGroup', fn ($q) => $q->where('name', $group));
         }
 
-        $rows = $query->get()->map(function (ReEnrollmentApplication $app) {
-            $enrollment = $app->enrollment;
-            $profile = $app->student?->profile;
+        $apps = $query->get();
+        $destByStudent = Enrollment::query()
+            ->where('academic_year_id', $period->to_academic_year_id)
+            ->whereIn('student_id', $apps->pluck('student_id')->filter()->all())
+            ->orderByDesc('id')
+            ->get()
+            ->unique('student_id')
+            ->keyBy('student_id');
 
-            return [
-                'id' => $app->id,
-                'enrollment_id' => $app->enrollment_id,
-                'student_id' => $app->student_id,
-                'student_name' => trim(($profile?->first_name ?? '') . ' ' . ($profile?->last_name ?? '')),
-                'grade' => $enrollment?->classGroup?->gradeLevel?->name,
-                'group' => $enrollment?->classGroup?->name,
-                'status' => $app->status->value,
-                'passed_cycle' => $app->passed_cycle,
-                'documents_complete' => $app->documents_complete,
-                'guardian_updated' => $app->guardian_updated,
-                'phone_updated' => $app->phone_updated,
-                'address_updated' => $app->address_updated,
-                'photo_updated' => $app->photo_updated,
-                'no_debts' => $app->no_debts,
-                'comments' => $app->comments,
-                'target_class_group_id' => $app->target_class_group_id,
-            ];
+        $rows = $apps->map(function (ReEnrollmentApplication $app) use ($destByStudent) {
+            return $this->applicationPayload($app, $destByStudent->get($app->student_id));
         });
 
         return response()->json(['success' => true, 'data' => $rows]);
@@ -164,5 +155,98 @@ class ReEnrollmentApplicationController extends Controller implements HasMiddlew
             'message' => $message,
             'data' => $result,
         ]);
+    }
+
+    public function confirmPresence(
+        ReEnrollmentPeriod $period,
+        ReEnrollmentApplication $application
+    ): JsonResponse {
+        if ($application->re_enrollment_period_id !== $period->id) {
+            return response()->json(['success' => false, 'message' => 'Solicitud no pertenece al periodo.'], 404);
+        }
+
+        try {
+            $dest = $this->reEnrollmentService->confirmPresence(
+                $application->loadMissing(['enrollment', 'period', 'student.profile'])
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Presencia confirmada. El alumno queda activo en el ciclo nuevo.',
+            'data' => $this->applicationPayload($application->fresh([
+                'enrollment.classGroup.gradeLevel',
+                'student.profile',
+            ]), $dest),
+            'stats' => $this->reEnrollmentService->dashboardStats($period),
+        ]);
+    }
+
+    public function confirmDropout(
+        ReEnrollmentPeriod $period,
+        ReEnrollmentApplication $application
+    ): JsonResponse {
+        if ($application->re_enrollment_period_id !== $period->id) {
+            return response()->json(['success' => false, 'message' => 'Solicitud no pertenece al periodo.'], 404);
+        }
+
+        try {
+            $this->reEnrollmentService->confirmDropout(
+                $application->loadMissing(['enrollment', 'period'])
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        $fresh = $application->fresh(['enrollment.classGroup.gradeLevel', 'student.profile']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Baja o cambio de escuela confirmado.',
+            'data' => $this->applicationPayload(
+                $fresh,
+                $this->reEnrollmentService->destinationEnrollment($fresh, $period)
+            ),
+            'stats' => $this->reEnrollmentService->dashboardStats($period),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function applicationPayload(ReEnrollmentApplication $app, ?Enrollment $destination = null): array
+    {
+        $enrollment = $app->enrollment;
+        $profile = $app->student?->profile;
+        $destStatus = $destination?->status;
+        $destStatusValue = $destStatus instanceof \BackedEnum ? $destStatus->value : $destStatus;
+
+        return [
+            'id' => $app->id,
+            'enrollment_id' => $app->enrollment_id,
+            'student_id' => $app->student_id,
+            'student_name' => trim(($profile?->first_name ?? '') . ' ' . ($profile?->last_name ?? '')),
+            'grade' => $enrollment?->classGroup?->gradeLevel?->name,
+            'group' => $enrollment?->classGroup?->name,
+            'status' => $app->status instanceof \BackedEnum ? $app->status->value : $app->status,
+            'passed_cycle' => $app->passed_cycle,
+            'documents_complete' => $app->documents_complete,
+            'guardian_updated' => $app->guardian_updated,
+            'phone_updated' => $app->phone_updated,
+            'address_updated' => $app->address_updated,
+            'photo_updated' => $app->photo_updated,
+            'no_debts' => $app->no_debts,
+            'comments' => $app->comments,
+            'target_class_group_id' => $app->target_class_group_id,
+            'origin_enrollment_status' => $enrollment?->status instanceof \BackedEnum
+                ? $enrollment->status->value
+                : $enrollment?->status,
+            'origin_is_approved' => $enrollment?->is_approved,
+            'destination_enrollment_id' => $destination?->id,
+            'destination_status' => $destStatusValue,
+            'waiting_activation' => $destStatusValue === EnrollmentStatus::PreEnrolled->value,
+        ];
     }
 }

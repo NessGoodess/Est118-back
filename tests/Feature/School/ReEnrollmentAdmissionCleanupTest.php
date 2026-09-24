@@ -97,11 +97,15 @@ class ReEnrollmentAdmissionCleanupTest extends TestCase
         ])->assertOk();
 
         $period->update(['current_step' => ReEnrollmentProcessStep::PROMOTION]);
+        GradeLevel::query()->firstOrCreate(['name' => '2°']);
         $late = $this->makeLateEnrollment($period);
 
         $this->postJson("/api/school/re-enrollment/periods/{$period->id}/promote", [
             'dry_run' => true,
-        ])->assertStatus(422);
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.skipped_without_decision', 1)
+            ->assertJsonPath('data.processed', 1);
 
         $lateApp = ReEnrollmentApplication::query()
             ->where('re_enrollment_period_id', $period->id)
@@ -111,7 +115,6 @@ class ReEnrollmentAdmissionCleanupTest extends TestCase
         $this->assertNotNull($lateApp);
         $this->assertSame(ReEnrollmentValidationStatus::PENDING, $lateApp->status);
 
-        $this->markAdminValidated($lateApp);
         $this->postJson("/api/school/re-enrollment/periods/{$period->id}/applications/bulk-decide", [
             'ids' => [$lateApp->id],
             'is_approved' => true,
@@ -119,7 +122,10 @@ class ReEnrollmentAdmissionCleanupTest extends TestCase
 
         $this->postJson("/api/school/re-enrollment/periods/{$period->id}/promote", [
             'dry_run' => true,
-        ])->assertOk();
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.skipped_without_decision', 0)
+            ->assertJsonPath('data.processed', 2);
     }
 
     /**

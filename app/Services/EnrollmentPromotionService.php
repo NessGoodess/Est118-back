@@ -28,8 +28,15 @@ class EnrollmentPromotionService
      * - Approved students in 1st and 2nd move to next grade with same group letter.
      * - Approved students in 3rd are graduated (no new enrollment).
      */
-    public function promote(int $fromAcademicYearId, int $toAcademicYearId, bool $dryRun = false): array
-    {
+    /**
+     * @param  (callable(Enrollment): EnrollmentStatus)|null  $destinationStatusFor
+     */
+    public function promote(
+        int $fromAcademicYearId,
+        int $toAcademicYearId,
+        bool $dryRun = false,
+        ?callable $destinationStatusFor = null
+    ): array {
         if ($fromAcademicYearId === $toAcademicYearId) {
             throw new RuntimeException('El ciclo origen y destino no pueden ser el mismo.');
         }
@@ -43,12 +50,8 @@ class EnrollmentPromotionService
             ->where('status', EnrollmentStatus::Active->value)
             ->get();
 
-        $pendingDecisions = $enrollments->whereNull('is_approved')->count();
-        if ($pendingDecisions > 0) {
-            throw new RuntimeException(
-                "No se puede ejecutar la promoción: hay {$pendingDecisions} inscripciones activas sin decisión (is_approved)."
-            );
-        }
+        $decided = $enrollments->whereNotNull('is_approved')->values();
+        $skippedWithoutDecision = $enrollments->whereNull('is_approved')->count();
 
         $this->ensureDestinationGroups($fromYear->id, $toYear->id);
 
@@ -59,6 +62,7 @@ class EnrollmentPromotionService
             'promoted' => 0,
             'retained' => 0,
             'graduated' => 0,
+            'skipped_without_decision' => $skippedWithoutDecision,
             'workshops_inherited' => 0,
             'workshops_skipped_manual' => 0,
             'workshops_missing' => 0,
@@ -73,12 +77,12 @@ class EnrollmentPromotionService
             ->get()
             ->keyBy('student_id');
 
-        $runner = function () use ($enrollments, $toYear, $fromWorkshops, &$summary): void {
-            foreach ($enrollments as $enrollment) {
+        $runner = function () use ($decided, $toYear, $fromWorkshops, $destinationStatusFor, &$summary): void {
+            foreach ($decided as $enrollment) {
                 $summary['processed']++;
 
                 try {
-                    $decision = $this->resolveDecision($enrollment->classGroup->gradeLevel->name, $enrollment->is_approved);
+                    $decision = $this->resolveDecision($enrollment->classGroup->gradeLevel->name, (bool) $enrollment->is_approved);
 
                     if ($decision['result'] === PromotionResult::GRADUATED) {
                         $enrollment->update([
@@ -100,9 +104,25 @@ class EnrollmentPromotionService
                         'academic_year_id' => $toYear->id,
                     ]);
 
+                    if ($nextEnrollment->exists && $nextEnrollment->status === EnrollmentStatus::Dropped) {
+                        continue;
+                    }
+
+                    $destStatus = EnrollmentStatus::Active;
+                    if ($destinationStatusFor) {
+                        $resolved = $destinationStatusFor($enrollment);
+                        $destStatus = $resolved instanceof EnrollmentStatus
+                            ? $resolved
+                            : EnrollmentStatus::from((string) $resolved);
+                    }
+
+                    if ($nextEnrollment->exists && $nextEnrollment->status === EnrollmentStatus::Active) {
+                        $destStatus = EnrollmentStatus::Active;
+                    }
+
                     $nextEnrollment->fill([
                         'class_group_id' => $targetGroup->id,
-                        'status' => EnrollmentStatus::Active,
+                        'status' => $destStatus,
                         'is_new_admission' => false,
                         'promotion_result' => $decision['result'],
                     ]);

@@ -3,25 +3,34 @@
 namespace App\Console\Commands\temporal;
 
 use App\Enums\AdmissionWorkshop;
-use App\Services\ConvertPreEnrollmentToStudentService;
-use App\Services\PreEnrollmentProcessService;
-use App\Services\WorkshopEnrollmentWriter;
+use App\Enums\EnrollmentStatus;
 use App\Enums\PreEnrollmentStatus;
+use App\Enums\PromotionResult;
+use App\Enums\ReEnrollmentPeriodStatus;
 use App\Enums\WorkshopEnrollmentSource;
 use App\Enums\WorkshopEnrollmentStatus;
 use App\Exceptions\AdmissionConversionException;
 use App\Models\AcademicYear;
+use App\Models\Address;
 use App\Models\AdmissionIntakeSetting;
 use App\Models\ClassGroup;
+use App\Models\Enrollment;
 use App\Models\GradeLevel;
+use App\Models\Guardian;
 use App\Models\PreEnrollment;
 use App\Models\Profile;
+use App\Models\School\ReEnrollmentPeriod;
 use App\Models\Student;
 use App\Models\Workshop;
+use App\Services\ConvertPreEnrollmentToStudentService;
+use App\Services\PreEnrollmentProcessService;
+use App\Services\WorkshopEnrollmentWriter;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use RuntimeException;
 use Throwable;
 
@@ -34,6 +43,46 @@ class ApplyFirstGradeRosterService
         private readonly WorkshopEnrollmentWriter $workshopWriter,
         private readonly PreEnrollmentProcessService $process,
     ) {}
+
+    public static function resolveYearId(int $yearId = 0): int
+    {
+        if ($yearId > 0) {
+            return $yearId;
+        }
+
+        $period = ReEnrollmentPeriod::query()
+            ->where('status', ReEnrollmentPeriodStatus::OPEN)
+            ->orderByDesc('id')
+            ->first();
+        if ($period) {
+            return (int) $period->to_academic_year_id;
+        }
+
+        return (int) AcademicYear::query()->where('is_active', true)->value('id');
+    }
+
+    public static function resolveDefaultFile(): string
+    {
+        $directories = [
+            storage_path('app/temp/listasExcel'),
+            dirname(base_path()).DIRECTORY_SEPARATOR.'listasExcel',
+        ];
+
+        foreach ($directories as $directory) {
+            if (! is_dir($directory)) {
+                continue;
+            }
+            $matches = glob($directory.DIRECTORY_SEPARATOR.'*.xlsx') ?: [];
+            foreach ($matches as $file) {
+                $name = mb_strtoupper(basename($file));
+                if (str_contains($name, 'PRIMEROS') || str_contains($name, 'PRIMERO')) {
+                    return $file;
+                }
+            }
+        }
+
+        return '';
+    }
 
     /**
      * @return array<string, mixed>
@@ -66,116 +115,128 @@ class ApplyFirstGradeRosterService
         $workshops = Workshop::query()->where('is_active', true)->get();
         $rows = $this->readRows($path);
         $pres = PreEnrollment::query()->get();
+        $students = Student::query()->with('profile')->get();
 
         $matches = $this->matchRows($rows, $pres);
+        $this->attachStudents($matches, $students);
+
+        $destByStudent = $this->firstGradeEnrollments($year->id, $firstGrade->id);
+        $originYearId = $this->originYearId($year->id);
+        $originByStudent = $originYearId
+            ? $this->firstGradeEnrollments($originYearId, $firstGrade->id)
+            : collect();
+
         $planned = [];
         $skipped = [];
         $applied = 0;
         $errors = [];
+        $converted = [];
+        $createdLate = [];
+        $placedExisting = [];
+        $alreadyInFirst = [];
+        $listStudentIds = [];
 
         foreach ($matches as $match) {
-            if ($match['pre'] === null) {
-                $skipped[] = [
-                    'row' => $match['row']['row'],
-                    'curp' => $match['row']['curp'],
-                    'name' => $this->excelName($match['row']),
-                    'reason' => $match['reason'],
-                ];
-
-                continue;
-            }
-
-            /** @var PreEnrollment $pre */
+            $row = $match['row'];
             $pre = $match['pre'];
-            $letter = $this->groupLetter($match['row']['group']);
+            $student = $match['student'];
+            $letter = $this->groupLetter($row['group']);
             $group = $letter ? $groups->get($letter) : null;
-            $workshop = $this->resolveWorkshop($match['row']['tech'], $workshops);
+            $workshop = $this->resolveWorkshop($row['tech'], $workshops);
 
             if (! $group) {
-                $skipped[] = $this->skip($match, 'El grupo '.$match['row']['group'].' no existe en 1° de este ciclo.');
+                $skipped[] = $this->skip($match, 'El grupo '.$row['group'].' no existe en 1° de este ciclo.');
 
                 continue;
             }
             if (! $workshop) {
-                $skipped[] = $this->skip($match, 'El taller '.$match['row']['tech'].' no está en el catálogo.');
+                $skipped[] = $this->skip($match, 'El taller '.$row['tech'].' no está en el catálogo.');
 
                 continue;
             }
-            if ($pre->status === PreEnrollmentStatus::REJECTED) {
+            if ($pre && $pre->status === PreEnrollmentStatus::REJECTED) {
                 $skipped[] = $this->skip($match, 'La preinscripción está rechazada.');
 
                 continue;
             }
+            if (! $pre && ! $student && ! $this->validCurp($row['curp'])) {
+                $skipped[] = $this->skip($match, 'La CURP del Excel no es válida para un alta tardía.');
 
-            $patch = $this->patchFromRow($pre, $match['row']);
+                continue;
+            }
+
+            $dest = $student ? $destByStudent->get($student->id) : null;
+            $action = $dest
+                ? 'already_enrolled'
+                : ($pre ? 'convert' : ($student ? 'place_existing' : 'create_late'));
+
             $planned[] = [
-                'row' => $match['row']['row'],
-                'pre_enrollment_id' => $pre->id,
-                'folio' => $pre->folio,
-                'curp' => $pre->curp,
-                'excel_curp' => $match['row']['curp'],
-                'near_curp' => $match['near'],
-                'name' => $this->excelName($match['row']),
+                'row' => $row['row'],
+                'pre_enrollment_id' => $pre?->id,
+                'folio' => $pre?->folio,
+                'curp' => $pre?->curp ?: ($student?->profile?->national_id ?: $row['curp']),
+                'excel_curp' => $row['curp'],
+                'near_curp' => $match['near'] || $match['near_student'],
+                'name' => $this->excelName($row),
                 'group' => $group->name,
                 'workshop' => $workshop->name,
-                'warnings' => $patch['warnings'],
+                'action' => $action,
+                'warnings' => $pre ? $this->patchFromRow($pre, $row)['warnings'] : [],
             ];
+
+            if ($action === 'already_enrolled') {
+                $alreadyInFirst[] = $this->personRow($match, $group->name, $workshop->name, 'Ya estaba en 1° del ciclo destino.');
+                if ($student) {
+                    $listStudentIds[$student->id] = true;
+                }
+            } elseif ($action === 'convert') {
+                $converted[] = $this->personRow($match, $group->name, $workshop->name, 'Se pasa desde preinscripción.');
+            } elseif ($action === 'place_existing') {
+                $placedExisting[] = $this->personRow($match, $group->name, $workshop->name, 'Ya era alumno; se inscribe en 1° destino.');
+            } else {
+                $createdLate[] = $this->personRow($match, $group->name, $workshop->name, 'No estaba en preinscripción; alta tardía.');
+            }
 
             if ($dryRun) {
                 continue;
             }
 
             try {
-                DB::transaction(function () use ($pre, $patch, $year, $group, $workshop, $settings) {
-                    $locked = PreEnrollment::query()->whereKey($pre->id)->lockForUpdate()->first();
-                    if (! $locked) {
-                        throw new RuntimeException('La preinscripción ya no existe.');
+                $savedStudent = DB::transaction(function () use (
+                    $action,
+                    $pre,
+                    $student,
+                    $row,
+                    $year,
+                    $group,
+                    $workshop,
+                    $settings,
+                    $originByStudent
+                ) {
+                    if ($action === 'convert') {
+                        return $this->convertPre($pre, $row, $year, $group, $workshop, $settings);
+                    }
+                    if ($action === 'already_enrolled') {
+                        $this->placeInDestination($student, $year, $group, $workshop, isNewAdmission: (bool) $student->enrollments()->where('is_new_admission', true)->exists());
+                        if ($pre) {
+                            $this->patchAndSyncPre($pre, $row, $student);
+                        }
+
+                        return $student;
+                    }
+                    if ($action === 'place_existing') {
+                        $this->placeInDestination($student, $year, $group, $workshop, isNewAdmission: false);
+                        $this->retainOrigin($originByStudent->get($student->id), $year->id);
+
+                        return $student;
                     }
 
-                    if ($patch['attributes'] !== []) {
-                        $locked->fill($patch['attributes']);
-                    }
-                    if ($patch['review_notes'] !== null) {
-                        $locked->review_notes = $patch['review_notes'];
-                    }
-                    $locked->save();
-
-                    if ($locked->status === PreEnrollmentStatus::PENDING) {
-                        $this->process->startInitialReview($locked->fresh());
-                        $locked->refresh();
-                    }
-
-                    $result = $this->converter->convert($locked->fresh(), [
-                        'academic_year_id' => $year->id,
-                        'class_group_id' => $group->id,
-                        'channel' => 'late',
-                        'force_incomplete_docs' => true,
-                        'force_incomplete_data' => (bool) $settings->allow_convert_without_complete_data,
-                        'force_without_payment' => true,
-                    ]);
-
-                    $student = $result['student'];
-                    $enrollment = $result['enrollment'];
-                    $this->syncStudent($student, $locked->fresh());
-
-                    if ((int) $enrollment->class_group_id !== (int) $group->id) {
-                        $enrollment->update([
-                            'class_group_id' => $group->id,
-                            'placement_status' => 'placed',
-                            'placed_at' => $enrollment->placed_at ?? now(),
-                        ]);
-                    }
-
-                    $this->workshopWriter->upsert(
-                        studentId: $student->id,
-                        academicYearId: $year->id,
-                        workshopId: $workshop->id,
-                        source: WorkshopEnrollmentSource::Manual,
-                        status: WorkshopEnrollmentStatus::Assigned,
-                        notes: 'Lista 1° 26-27',
-                    );
+                    return $this->createLateStudent($row, $year, $group, $workshop);
                 });
                 $applied++;
+                if ($savedStudent) {
+                    $listStudentIds[$savedStudent->id] = true;
+                }
             } catch (AdmissionConversionException $exception) {
                 $errors[] = $this->skip($match, $exception->getMessage());
             } catch (Throwable $exception) {
@@ -184,20 +245,33 @@ class ApplyFirstGradeRosterService
         }
 
         $reports = $this->buildReports($matches);
+        $notOnDestList = $this->peopleNotOnList($destByStudent, $listStudentIds, $matches, $dryRun);
+        $notOnOriginList = $originYearId
+            ? $this->peopleNotOnList($originByStudent, $listStudentIds, $matches, true)
+            : [];
 
         return [
             'dry_run' => $dryRun,
             'academic_year_id' => $year->id,
+            'academic_year_label' => trim($year->year_start.'-'.$year->year_end),
             'rows' => count($rows),
-            'matched' => count($planned),
+            'in_pre' => count(array_filter($matches, fn (array $match) => $match['pre'] !== null)),
+            'matched' => count($converted) + count(array_filter($alreadyInFirst, fn (array $row) => ($row['had_pre'] ?? false))),
             'near_matches' => count(array_filter($planned, fn (array $row) => $row['near_curp'])),
             'applied' => $dryRun ? 0 : $applied,
             'planned' => $planned,
             'skipped' => $skipped,
             'errors' => $errors,
             'manual_adds' => $reports['manual_adds'],
+            'not_in_pre_count' => count($reports['manual_adds']),
             'curp_comparisons' => $reports['curp_comparisons'],
             'age_mismatches' => $reports['age_mismatches'],
+            'converted' => $converted,
+            'created_late' => $createdLate,
+            'placed_existing' => $placedExisting,
+            'already_in_first' => $alreadyInFirst,
+            'dest_first_not_on_list' => $notOnDestList,
+            'origin_first_not_on_list' => $notOnOriginList,
         ];
     }
 
@@ -228,40 +302,41 @@ class ApplyFirstGradeRosterService
     {
         $reader = IOFactory::createReaderForFile($path);
         $reader->setReadDataOnly(true);
-        $reader->setLoadSheetsOnly([self::SHEET]);
-        $sheet = $reader->load($path)->getSheetByName(self::SHEET);
+        $book = $reader->load($path);
+        $sheet = $book->getSheetByName(self::SHEET) ?: $book->getSheet(0);
         if (! $sheet) {
             throw new RuntimeException('El Excel no tiene la hoja '.self::SHEET.'.');
         }
 
+        $map = $this->columnMap($sheet);
         $rows = [];
         $highest = $sheet->getHighestRow();
         for ($r = 5; $r <= $highest; $r++) {
             $row = [
                 'row' => (string) $r,
-                'first' => $this->cell($sheet, 'B', $r),
-                'paterno' => $this->cell($sheet, 'C', $r),
-                'materno' => $this->cell($sheet, 'D', $r),
-                'curp' => strtoupper($this->cell($sheet, 'F', $r)),
-                'group' => $this->cell($sheet, 'G', $r),
-                'birth' => $this->cell($sheet, 'H', $r),
-                'age' => $this->cell($sheet, 'I', $r),
-                'stat_age' => $this->cell($sheet, 'K', $r),
-                'gender' => $this->cell($sheet, 'L', $r),
-                'tech' => $this->cell($sheet, 'M', $r),
-                'street_type' => $this->cell($sheet, 'N', $r),
-                'street' => $this->cell($sheet, 'O', $r),
-                'interior' => $this->cell($sheet, 'P', $r),
-                'exterior' => $this->cell($sheet, 'Q', $r),
-                'settlement_type' => $this->cell($sheet, 'R', $r),
-                'settlement' => $this->cell($sheet, 'S', $r),
-                'g_paterno' => $this->cell($sheet, 'T', $r),
-                'g_materno' => $this->cell($sheet, 'U', $r),
-                'g_name' => $this->cell($sheet, 'V', $r),
-                'g_curp' => strtoupper($this->cell($sheet, 'W', $r)),
-                'phone' => $this->cell($sheet, 'X', $r),
-                'kinship' => $this->cell($sheet, 'Y', $r),
-                'notes' => $this->cell($sheet, 'Z', $r),
+                'first' => $this->cell($sheet, $map['first'], $r),
+                'paterno' => $this->cell($sheet, $map['paterno'], $r),
+                'materno' => $this->cell($sheet, $map['materno'], $r),
+                'curp' => strtoupper($this->cell($sheet, $map['curp'], $r)),
+                'group' => $this->cell($sheet, $map['group'], $r),
+                'birth' => $this->cell($sheet, $map['birth'], $r),
+                'age' => $this->cell($sheet, $map['age'], $r),
+                'stat_age' => $this->cell($sheet, $map['stat_age'], $r),
+                'gender' => $this->cell($sheet, $map['gender'], $r),
+                'tech' => $this->cell($sheet, $map['tech'], $r),
+                'street_type' => $this->cell($sheet, $map['street_type'], $r),
+                'street' => $this->cell($sheet, $map['street'], $r),
+                'interior' => $this->cell($sheet, $map['interior'], $r),
+                'exterior' => $this->cell($sheet, $map['exterior'], $r),
+                'settlement_type' => $this->cell($sheet, $map['settlement_type'], $r),
+                'settlement' => $this->cell($sheet, $map['settlement'], $r),
+                'g_paterno' => $this->cell($sheet, $map['g_paterno'], $r),
+                'g_materno' => $this->cell($sheet, $map['g_materno'], $r),
+                'g_name' => $this->cell($sheet, $map['g_name'], $r),
+                'g_curp' => strtoupper($this->cell($sheet, $map['g_curp'], $r)),
+                'phone' => $this->cell($sheet, $map['phone'], $r),
+                'kinship' => $this->cell($sheet, $map['kinship'], $r),
+                'notes' => $this->cell($sheet, $map['notes'], $r),
             ];
             if ($row['curp'] === '' && $row['first'] === '' && $row['paterno'] === '' && $row['group'] === '') {
                 continue;
@@ -272,6 +347,70 @@ class ApplyFirstGradeRosterService
         return $rows;
     }
 
+    /**
+     * @return array<string, string>
+     */
+    private function columnMap($sheet): array
+    {
+        $headerG = mb_strtoupper($this->cell($sheet, 'G', 4));
+        $sampleG = strtoupper($this->cell($sheet, 'G', 5));
+        $newLayout = str_contains($headerG, 'CURP') || $this->validCurp($sampleG);
+
+        if ($newLayout) {
+            return [
+                'first' => 'C',
+                'paterno' => 'D',
+                'materno' => 'E',
+                'curp' => 'G',
+                'group' => 'H',
+                'birth' => 'I',
+                'age' => 'J',
+                'stat_age' => 'L',
+                'gender' => 'M',
+                'tech' => 'N',
+                'street_type' => 'O',
+                'street' => 'P',
+                'interior' => 'Q',
+                'exterior' => 'R',
+                'settlement_type' => 'S',
+                'settlement' => 'T',
+                'g_paterno' => 'U',
+                'g_materno' => 'V',
+                'g_name' => 'W',
+                'g_curp' => 'X',
+                'phone' => 'Y',
+                'kinship' => 'Z',
+                'notes' => 'AA',
+            ];
+        }
+
+        return [
+            'first' => 'B',
+            'paterno' => 'C',
+            'materno' => 'D',
+            'curp' => 'F',
+            'group' => 'G',
+            'birth' => 'H',
+            'age' => 'I',
+            'stat_age' => 'K',
+            'gender' => 'L',
+            'tech' => 'M',
+            'street_type' => 'N',
+            'street' => 'O',
+            'interior' => 'P',
+            'exterior' => 'Q',
+            'settlement_type' => 'R',
+            'settlement' => 'S',
+            'g_paterno' => 'T',
+            'g_materno' => 'U',
+            'g_name' => 'V',
+            'g_curp' => 'W',
+            'phone' => 'X',
+            'kinship' => 'Y',
+            'notes' => 'Z',
+        ];
+    }
+
     private function cell($sheet, string $column, int $row): string
     {
         return trim((string) $sheet->getCell($column.$row)->getFormattedValue());
@@ -280,7 +419,7 @@ class ApplyFirstGradeRosterService
     /**
      * @param  list<array<string, string>>  $rows
      * @param  Collection<int, PreEnrollment>  $pres
-     * @return list<array{row: array<string, string>, pre: ?PreEnrollment, near: bool, reason: string}>
+     * @return list<array{row: array<string, string>, pre: ?PreEnrollment, student: ?Student, near: bool, near_student: bool, reason: string}>
      */
     private function matchRows(array $rows, Collection $pres): array
     {
@@ -296,7 +435,7 @@ class ApplyFirstGradeRosterService
 
         foreach ($rows as $row) {
             if ($row['curp'] === '') {
-                $matches[] = ['row' => $row, 'pre' => null, 'near' => false, 'reason' => 'La fila no trae CURP.'];
+                $matches[] = $this->emptyMatch($row, 'La fila no trae CURP.');
 
                 continue;
             }
@@ -304,13 +443,20 @@ class ApplyFirstGradeRosterService
             $found = $byCurp[$row['curp']] ?? [];
             $found = array_values(array_filter($found, fn (PreEnrollment $pre) => ! isset($used[$pre->id])));
             if (count($found) > 1) {
-                $matches[] = ['row' => $row, 'pre' => null, 'near' => false, 'reason' => 'Hay más de una preinscripción con esa CURP.'];
+                $matches[] = $this->emptyMatch($row, 'Hay más de una preinscripción con esa CURP.');
 
                 continue;
             }
             if (count($found) === 1) {
                 $used[$found[0]->id] = true;
-                $matches[] = ['row' => $row, 'pre' => $found[0], 'near' => false, 'reason' => ''];
+                $matches[] = [
+                    'row' => $row,
+                    'pre' => $found[0],
+                    'student' => null,
+                    'near' => false,
+                    'near_student' => false,
+                    'reason' => '',
+                ];
 
                 continue;
             }
@@ -339,22 +485,428 @@ class ApplyFirstGradeRosterService
 
             if (count($candidates) === 1) {
                 $used[$candidates[0]->id] = true;
-                $matches[] = ['row' => $row, 'pre' => $candidates[0], 'near' => true, 'reason' => ''];
+                $matches[] = [
+                    'row' => $row,
+                    'pre' => $candidates[0],
+                    'student' => null,
+                    'near' => true,
+                    'near_student' => false,
+                    'reason' => '',
+                ];
 
                 continue;
             }
 
-            $matches[] = [
-                'row' => $row,
-                'pre' => null,
-                'near' => false,
-                'reason' => count($candidates) > 1
+            $matches[] = $this->emptyMatch(
+                $row,
+                count($candidates) > 1
                     ? 'La CURP parecida coincide con más de una preinscripción.'
-                    : 'No hay preinscripción con esa CURP.',
-            ];
+                    : 'No hay preinscripción con esa CURP.'
+            );
         }
 
         return $matches;
+    }
+
+    /**
+     * @param  list<array{row: array<string, string>, pre: ?PreEnrollment, student: ?Student, near: bool, near_student: bool, reason: string}>  $matches
+     * @param  Collection<int, Student>  $students
+     */
+    private function attachStudents(array &$matches, Collection $students): void
+    {
+        $byCurp = [];
+        foreach ($students as $student) {
+            $curp = strtoupper(trim((string) ($student->profile?->national_id ?? '')));
+            if ($curp === '') {
+                continue;
+            }
+            $byCurp[$curp][] = $student;
+        }
+
+        $used = [];
+        foreach ($matches as &$match) {
+            if ($match['pre']?->converted_student_id) {
+                $converted = $students->firstWhere('id', (int) $match['pre']->converted_student_id);
+                if ($converted) {
+                    $match['student'] = $converted;
+                    $used[$converted->id] = true;
+
+                    continue;
+                }
+            }
+
+            $curp = $match['row']['curp'];
+            $found = array_values(array_filter(
+                $byCurp[$curp] ?? [],
+                fn (Student $student) => ! isset($used[$student->id])
+            ));
+            if (count($found) === 1) {
+                $match['student'] = $found[0];
+                $used[$found[0]->id] = true;
+            }
+        }
+        unset($match);
+
+        foreach ($matches as &$match) {
+            if ($match['student'] || $match['row']['curp'] === '') {
+                continue;
+            }
+
+            $candidates = [];
+            foreach ($students as $student) {
+                if (isset($used[$student->id]) || ! $student->profile) {
+                    continue;
+                }
+                $curp = strtoupper(trim((string) $student->profile->national_id));
+                if (abs(strlen($curp) - strlen($match['row']['curp'])) > 1) {
+                    continue;
+                }
+                if (levenshtein($curp, $match['row']['curp']) !== 1) {
+                    continue;
+                }
+                $studentName = trim($student->profile->first_name.' '.$student->profile->last_name);
+                if ($this->normalizeName($this->excelName($match['row'])) !== $this->normalizeName($studentName)) {
+                    continue;
+                }
+                $candidates[] = $student;
+            }
+
+            if (count($candidates) === 1) {
+                $match['student'] = $candidates[0];
+                $match['near_student'] = true;
+                $used[$candidates[0]->id] = true;
+            }
+        }
+        unset($match);
+    }
+
+    /**
+     * @return array{row: array<string, string>, pre: ?PreEnrollment, student: ?Student, near: bool, near_student: bool, reason: string}
+     */
+    private function emptyMatch(array $row, string $reason): array
+    {
+        return [
+            'row' => $row,
+            'pre' => null,
+            'student' => null,
+            'near' => false,
+            'near_student' => false,
+            'reason' => $reason,
+        ];
+    }
+
+    private function convertPre(
+        PreEnrollment $pre,
+        array $row,
+        AcademicYear $year,
+        ClassGroup $group,
+        Workshop $workshop,
+        AdmissionIntakeSetting $settings,
+    ): Student {
+        $locked = $this->patchAndLockPre($pre, $row);
+
+        $result = $this->converter->convert($locked->fresh(), [
+            'academic_year_id' => $year->id,
+            'class_group_id' => $group->id,
+            'channel' => 'late',
+            'force_incomplete_docs' => true,
+            'force_incomplete_data' => (bool) $settings->allow_convert_without_complete_data,
+            'force_without_payment' => true,
+        ]);
+
+        $student = $result['student'];
+        $enrollment = $result['enrollment'];
+        $this->syncStudent($student, $locked->fresh());
+
+        if ((int) $enrollment->academic_year_id !== (int) $year->id) {
+            $this->placeInDestination($student, $year, $group, $workshop, isNewAdmission: true);
+        } else {
+            if ((int) $enrollment->class_group_id !== (int) $group->id) {
+                $enrollment->update([
+                    'class_group_id' => $group->id,
+                    'placement_status' => 'placed',
+                    'placed_at' => $enrollment->placed_at ?? now(),
+                ]);
+            }
+            $this->workshopWriter->upsert(
+                studentId: $student->id,
+                academicYearId: $year->id,
+                workshopId: $workshop->id,
+                source: WorkshopEnrollmentSource::Manual,
+                status: WorkshopEnrollmentStatus::Assigned,
+                notes: 'Lista 1° 26-27',
+            );
+        }
+
+        return $student;
+    }
+
+    private function patchAndLockPre(PreEnrollment $pre, array $row): PreEnrollment
+    {
+        $locked = PreEnrollment::query()->whereKey($pre->id)->lockForUpdate()->first();
+        if (! $locked) {
+            throw new RuntimeException('La preinscripción ya no existe.');
+        }
+
+        $this->applyPrePatch($locked, $row);
+        if ($locked->status === PreEnrollmentStatus::PENDING) {
+            $this->process->startInitialReview($locked->fresh());
+            $locked->refresh();
+        }
+
+        return $locked;
+    }
+
+    private function patchAndSyncPre(PreEnrollment $pre, array $row, Student $student): void
+    {
+        $locked = PreEnrollment::query()->whereKey($pre->id)->lockForUpdate()->first();
+        if (! $locked) {
+            return;
+        }
+        $this->applyPrePatch($locked, $row);
+        $this->syncStudent($student, $locked->fresh());
+    }
+
+    private function applyPrePatch(PreEnrollment $locked, array $row): void
+    {
+        $patch = $this->patchFromRow($locked, $row);
+        if ($patch['attributes'] !== []) {
+            $locked->fill($patch['attributes']);
+        }
+        if ($patch['review_notes'] !== null) {
+            $locked->review_notes = $patch['review_notes'];
+        }
+        $locked->save();
+    }
+
+    private function createLateStudent(array $row, AcademicYear $year, ClassGroup $group, Workshop $workshop): Student
+    {
+        $curp = $row['curp'];
+        if (! $this->validCurp($curp)) {
+            throw new RuntimeException('La CURP del Excel no es válida para un alta tardía.');
+        }
+        if (Profile::query()->where('national_id', $curp)->exists()) {
+            throw new RuntimeException('Ya existe una persona con esa CURP.');
+        }
+
+        $birth = $this->dateFromCurp($curp);
+        if (! $birth) {
+            throw new RuntimeException('No se pudo leer la fecha de nacimiento de la CURP.');
+        }
+
+        $gender = $this->gender($row['gender']) ?? $this->genderFromCurp($curp) ?? 'O';
+        $phone = preg_replace('/\D/', '', $row['phone']) ?? '';
+        $phone = strlen($phone) === 10 ? $phone : null;
+
+        $address = Address::query()->create([
+            'street_type' => $row['street_type'] !== '' ? $row['street_type'] : 'CALLE',
+            'street_name' => $row['street'] !== '' ? $row['street'] : 'SIN CALLE',
+            'house_number' => $row['exterior'] !== '' ? $row['exterior'] : ($row['interior'] !== '' ? $row['interior'] : 'S/N'),
+            'unit_number' => $row['exterior'] !== '' && $row['interior'] !== '' ? $row['interior'] : null,
+            'neighborhood_type' => $row['settlement_type'] !== '' ? $row['settlement_type'] : 'COLONIA',
+            'neighborhood_name' => $row['settlement'] !== '' ? $row['settlement'] : 'SIN COLONIA',
+            'postal_code' => '00000',
+            'city' => 'Oaxaca de Juárez',
+            'state' => 'Oaxaca',
+        ]);
+
+        $profile = Profile::query()->create([
+            'national_id' => $curp,
+            'first_name' => $row['first'],
+            'last_name' => trim($row['paterno'].' '.$row['materno']),
+            'birth_date' => $birth,
+            'gender' => $gender,
+            'phone_number' => $phone,
+            'address_id' => $address->id,
+        ]);
+
+        $studentData = ['profile_id' => $profile->id];
+        if (Schema::hasColumn('students', 'place_of_birth')) {
+            $studentData['place_of_birth'] = 'Oaxaca';
+        }
+        if (Schema::hasColumn('students', 'previous_school')) {
+            $studentData['previous_school'] = 'No registrada';
+        }
+        if (Schema::hasColumn('students', 'current_average')) {
+            $studentData['current_average'] = 8;
+        }
+
+        $student = Student::query()->create($studentData);
+
+        $this->attachGuardian($student, $row, $phone);
+        $this->placeInDestination($student, $year, $group, $workshop, isNewAdmission: true);
+
+        return $student;
+    }
+
+    private function attachGuardian(Student $student, array $row, ?string $phone): void
+    {
+        $guardianCurp = $row['g_curp'];
+        if ($guardianCurp === '' || $guardianCurp === $row['curp'] || ! $this->validCurp($guardianCurp)) {
+            $guardianCurp = 'TUT'.substr(preg_replace('/[^A-Z0-9]/', '', $row['curp']) ?? $row['curp'], 0, 15);
+        }
+        if (strlen($guardianCurp) < 4) {
+            return;
+        }
+
+        $guardianProfile = Profile::query()->firstOrCreate(
+            ['national_id' => $guardianCurp],
+            [
+                'first_name' => $row['g_name'] !== '' ? $row['g_name'] : 'Tutor',
+                'last_name' => trim($row['g_paterno'].' '.$row['g_materno']) ?: 'Sin apellido',
+                'gender' => 'O',
+                'phone_number' => $phone,
+            ]
+        );
+
+        $kinship = $row['kinship'] !== '' ? $row['kinship'] : 'Tutor';
+        $guardian = Guardian::query()->firstOrCreate(
+            ['profile_id' => $guardianProfile->id],
+            ['Kinship' => $kinship]
+        );
+        $student->guardians()->syncWithoutDetaching([
+            $guardian->id => ['relationship' => $kinship],
+        ]);
+    }
+
+    private function placeInDestination(
+        Student $student,
+        AcademicYear $year,
+        ClassGroup $group,
+        Workshop $workshop,
+        bool $isNewAdmission,
+    ): Enrollment {
+        $enrollment = Enrollment::query()->firstOrNew([
+            'student_id' => $student->id,
+            'academic_year_id' => $year->id,
+        ]);
+        if ($enrollment->exists && $enrollment->status === EnrollmentStatus::Dropped) {
+            throw new RuntimeException('La inscripción del ciclo destino está en baja.');
+        }
+
+        $enrollment->fill([
+            'class_group_id' => $group->id,
+            'status' => EnrollmentStatus::Active,
+            'is_new_admission' => $enrollment->exists ? $enrollment->is_new_admission : $isNewAdmission,
+            'admission_channel' => $enrollment->admission_channel ?: 'late',
+            'placement_status' => 'placed',
+            'placed_at' => $enrollment->placed_at ?? now(),
+        ]);
+        $enrollment->save();
+
+        $this->workshopWriter->upsert(
+            studentId: $student->id,
+            academicYearId: $year->id,
+            workshopId: $workshop->id,
+            source: WorkshopEnrollmentSource::Manual,
+            status: WorkshopEnrollmentStatus::Assigned,
+            notes: 'Lista 1° 26-27',
+        );
+
+        return $enrollment;
+    }
+
+    private function retainOrigin(?Enrollment $origin, int $destYearId): void
+    {
+        if (! $origin || (int) $origin->academic_year_id === $destYearId) {
+            return;
+        }
+        if ($origin->status === EnrollmentStatus::Completed) {
+            return;
+        }
+
+        $origin->update([
+            'is_approved' => false,
+            'status' => EnrollmentStatus::Completed,
+            'promotion_result' => PromotionResult::RETAINED,
+        ]);
+    }
+
+    /**
+     * @return Collection<int, Enrollment>
+     */
+    private function firstGradeEnrollments(int $yearId, int $gradeId): Collection
+    {
+        return Enrollment::query()
+            ->where('academic_year_id', $yearId)
+            ->whereIn('status', [EnrollmentStatus::Active, EnrollmentStatus::Completed])
+            ->whereHas('classGroup', fn ($query) => $query->where('grade_level_id', $gradeId))
+            ->with(['student.profile', 'classGroup'])
+            ->get()
+            ->keyBy('student_id');
+    }
+
+    private function originYearId(int $destYearId): ?int
+    {
+        $period = ReEnrollmentPeriod::query()
+            ->where('to_academic_year_id', $destYearId)
+            ->orderByDesc('id')
+            ->first();
+        if ($period) {
+            return (int) $period->from_academic_year_id;
+        }
+
+        $dest = AcademicYear::query()->find($destYearId);
+        if (! $dest) {
+            return null;
+        }
+
+        $originId = AcademicYear::query()->where('year_end', $dest->year_start)->value('id');
+
+        return $originId ? (int) $originId : null;
+    }
+
+    /**
+     * @param  Collection<int, Enrollment>  $enrollments
+     * @param  array<int, true>  $listStudentIds
+     * @param  list<array{row: array<string, string>, pre: ?PreEnrollment, student: ?Student, near: bool, near_student: bool, reason: string}>  $matches
+     * @return list<array{curp: string, name: string, group: string, reason: string}>
+     */
+    private function peopleNotOnList(Collection $enrollments, array $listStudentIds, array $matches, bool $includeDryRunIds): array
+    {
+        $onList = $listStudentIds;
+        if ($includeDryRunIds) {
+            foreach ($matches as $match) {
+                if ($match['student']) {
+                    $onList[$match['student']->id] = true;
+                }
+            }
+        }
+
+        $missing = [];
+        foreach ($enrollments as $enrollment) {
+            if (isset($onList[$enrollment->student_id])) {
+                continue;
+            }
+            $profile = $enrollment->student?->profile;
+            $missing[] = [
+                'curp' => strtoupper(trim((string) ($profile?->national_id ?? ''))),
+                'name' => trim(($profile?->first_name ?? '').' '.($profile?->last_name ?? '')),
+                'group' => (string) ($enrollment->classGroup?->name ?? ''),
+                'reason' => 'Está en 1° y no aparece en el directorio.',
+            ];
+        }
+
+        usort($missing, fn (array $left, array $right) => [$left['group'], $left['name']] <=> [$right['group'], $right['name']]);
+
+        return $missing;
+    }
+
+    /**
+     * @param  array{row: array<string, string>, pre: ?PreEnrollment, student: ?Student, near: bool, near_student: bool, reason: string}  $match
+     * @return array{row: string, curp: string, name: string, group: string, tech: string, reason: string, had_pre: bool}
+     */
+    private function personRow(array $match, string $group, string $tech, string $reason): array
+    {
+        return [
+            'row' => $match['row']['row'],
+            'curp' => $match['row']['curp'],
+            'name' => $this->excelName($match['row']),
+            'group' => $group,
+            'tech' => $tech,
+            'reason' => $reason,
+            'had_pre' => $match['pre'] !== null,
+        ];
     }
 
     /**
@@ -511,16 +1063,24 @@ class ApplyFirstGradeRosterService
     private function resolveWorkshop(string $label, Collection $workshops): ?Workshop
     {
         $key = AdmissionWorkshop::normalize($label);
-        if ($key === 'ofimatica') {
+        if ($key === 'ofimatica' || str_contains($key, 'ofimatica')) {
             return $workshops->first(fn (Workshop $workshop) => $workshop->code === Workshop::OFIMATICA_CODE);
         }
 
         $case = AdmissionWorkshop::fromName($label);
-        if (! $case) {
-            return null;
+        if ($case) {
+            return $workshops->first(fn (Workshop $workshop) => $workshop->code === $case->code());
         }
 
-        return $workshops->first(fn (Workshop $workshop) => $workshop->code === $case->code());
+        foreach (AdmissionWorkshop::cases() as $option) {
+            $needle = AdmissionWorkshop::normalize($option->value);
+            if ($key !== '' && (str_contains($key, $needle) || str_contains($needle, $key))) {
+                return $workshops->first(fn (Workshop $workshop) => $workshop->code === $option->code());
+            }
+        }
+
+        return $workshops->first(fn (Workshop $workshop) => AdmissionWorkshop::normalize((string) $workshop->name) === $key
+            || AdmissionWorkshop::normalize((string) $workshop->code) === $key);
     }
 
     private function groupLetter(string $raw): ?string
@@ -538,6 +1098,17 @@ class ApplyFirstGradeRosterService
         return match ($key) {
             'mujer', 'femenino', 'f' => 'F',
             'hombre', 'masculino', 'm' => 'M',
+            default => null,
+        };
+    }
+
+    private function genderFromCurp(string $curp): ?string
+    {
+        $mark = strtoupper(substr($curp, 10, 1));
+
+        return match ($mark) {
+            'H' => 'M',
+            'M' => 'F',
             default => null,
         };
     }
@@ -568,8 +1139,8 @@ class ApplyFirstGradeRosterService
     }
 
     /**
-     * @param  array{row: array<string, string>, pre: ?PreEnrollment, near: bool, reason: string}  $match
-     * @return array{row: string, curp: string, name: string, reason: string}
+     * @param  array{row: array<string, string>, pre: ?PreEnrollment, student: ?Student, near: bool, near_student: bool, reason: string}  $match
+     * @return array{row: string, curp: string, name: string, group: string, tech: string, reason: string}
      */
     private function skip(array $match, string $reason): array
     {
@@ -584,7 +1155,7 @@ class ApplyFirstGradeRosterService
     }
 
     /**
-     * @param  list<array{row: array<string, string>, pre: ?PreEnrollment, near: bool, reason: string}>  $matches
+     * @param  list<array{row: array<string, string>, pre: ?PreEnrollment, student: ?Student, near: bool, near_student: bool, reason: string}>  $matches
      * @return array{
      *   manual_adds: list<array{row: string, curp: string, name: string, group: string, tech: string, reason: string}>,
      *   curp_comparisons: list<array{name: string, excel_curp: string, db_curp: string, decision: string}>,
@@ -605,11 +1176,14 @@ class ApplyFirstGradeRosterService
                 $manual[] = $this->skip($match, $match['reason']);
             }
 
-            if ($pre && strtoupper(trim((string) $pre->curp)) !== $row['curp']) {
+            $dbCurp = $pre
+                ? strtoupper(trim((string) $pre->curp))
+                : strtoupper(trim((string) ($match['student']?->profile?->national_id ?? '')));
+            if ($dbCurp !== '' && $dbCurp !== $row['curp']) {
                 $curps[] = [
                     'name' => $this->excelName($row),
                     'excel_curp' => $row['curp'],
-                    'db_curp' => strtoupper(trim((string) $pre->curp)),
+                    'db_curp' => $dbCurp,
                     'decision' => 'Se quedó la CURP de la base',
                 ];
             }
@@ -649,6 +1223,8 @@ class ApplyFirstGradeRosterService
         $kept = 'No se cambió: no hay preinscripción';
         if ($pre && $pre->birth_date) {
             $kept = 'Se quedó la fecha de la base ('.$this->displayDate(substr((string) $pre->birth_date, 0, 10)).')';
+        } elseif (! $pre) {
+            $kept = 'Alta tardía: se usó la fecha de la CURP ('.($curpDate ? $this->displayDate($curpDate) : '—').')';
         }
 
         return [
@@ -680,7 +1256,16 @@ class ApplyFirstGradeRosterService
 
     private function parseExcelDate(string $value): ?string
     {
-        if (! preg_match('/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/', trim($value), $matches)) {
+        $value = trim($value);
+        if ($value !== '' && is_numeric($value) && (float) $value > 20000) {
+            try {
+                return ExcelDate::excelToDateTimeObject((float) $value)->format('Y-m-d');
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        if (! preg_match('/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/', $value, $matches)) {
             return null;
         }
 

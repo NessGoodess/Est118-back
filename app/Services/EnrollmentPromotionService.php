@@ -30,12 +30,14 @@ class EnrollmentPromotionService
      */
     /**
      * @param  (callable(Enrollment): EnrollmentStatus)|null  $destinationStatusFor
+     * @param  list<int>  $excludeEnrollmentIds
      */
     public function promote(
         int $fromAcademicYearId,
         int $toAcademicYearId,
         bool $dryRun = false,
-        ?callable $destinationStatusFor = null
+        ?callable $destinationStatusFor = null,
+        array $excludeEnrollmentIds = []
     ): array {
         if ($fromAcademicYearId === $toAcademicYearId) {
             throw new RuntimeException('El ciclo origen y destino no pueden ser el mismo.');
@@ -48,6 +50,7 @@ class EnrollmentPromotionService
             ->with(['classGroup.gradeLevel'])
             ->where('academic_year_id', $fromYear->id)
             ->where('status', EnrollmentStatus::Active->value)
+            ->when($excludeEnrollmentIds !== [], fn ($query) => $query->whereNotIn('id', $excludeEnrollmentIds))
             ->get();
 
         $decided = $enrollments->whereNotNull('is_approved')->values();

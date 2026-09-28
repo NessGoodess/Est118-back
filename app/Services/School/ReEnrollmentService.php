@@ -7,11 +7,15 @@ use App\Enums\ReEnrollmentEventAction;
 use App\Enums\ReEnrollmentPeriodStatus;
 use App\Enums\ReEnrollmentProcessStep;
 use App\Enums\ReEnrollmentValidationStatus;
+use App\Models\ClassGroup;
 use App\Models\Enrollment;
+use App\Models\GradeLevel;
 use App\Models\School\ReEnrollmentApplication;
 use App\Models\School\ReEnrollmentEvent;
 use App\Models\School\ReEnrollmentPeriod;
+use App\Models\WorkshopEnrollment;
 use App\Services\EnrollmentPromotionService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -25,10 +29,9 @@ class ReEnrollmentService
 
     public function syncApplications(ReEnrollmentPeriod $period): int
     {
-        $enrollments = Enrollment::query()
-            ->where('academic_year_id', $period->from_academic_year_id)
-            ->where('status', EnrollmentStatus::Active->value)
-            ->get(['id', 'student_id']);
+        $this->excludeIncomingIntakesFromPeriod($period);
+
+        $enrollments = $this->originActiveQuery($period)->get(['id', 'student_id']);
 
         $created = 0;
 
@@ -54,6 +57,7 @@ class ReEnrollmentService
 
     public function dashboardStats(ReEnrollmentPeriod $period): array
     {
+        $this->excludeIncomingIntakesFromPeriod($period);
         $applications = $period->applications();
 
         $total = (clone $applications)->count();
@@ -175,27 +179,21 @@ class ReEnrollmentService
 
     public function missingOriginEnrollmentDecisions(ReEnrollmentPeriod $period): int
     {
-        return Enrollment::query()
-            ->where('academic_year_id', $period->from_academic_year_id)
-            ->where('status', EnrollmentStatus::Active->value)
+        return $this->originActiveQuery($period)
             ->whereNull('is_approved')
             ->count();
     }
 
     public function unsyncedOriginEnrollmentsCount(ReEnrollmentPeriod $period): int
     {
-        return Enrollment::query()
-            ->where('academic_year_id', $period->from_academic_year_id)
-            ->where('status', EnrollmentStatus::Active->value)
+        return $this->originActiveQuery($period)
             ->whereNotIn('id', $period->applications()->select('enrollment_id'))
             ->count();
     }
 
     public function decidedActiveOriginCount(ReEnrollmentPeriod $period): int
     {
-        return Enrollment::query()
-            ->where('academic_year_id', $period->from_academic_year_id)
-            ->where('status', EnrollmentStatus::Active->value)
+        return $this->originActiveQuery($period)
             ->whereNotNull('is_approved')
             ->count();
     }
@@ -585,6 +583,7 @@ class ReEnrollmentService
         }
 
         $applications = $period->applications()->get()->keyBy('enrollment_id');
+        $excludeIds = $this->incomingIntakeEnrollmentIds($period);
 
         $summary = $this->promotionService->promote(
             $period->from_academic_year_id,
@@ -601,7 +600,8 @@ class ReEnrollmentService
                 }
 
                 return EnrollmentStatus::PreEnrolled;
-            }
+            },
+            $excludeIds
         );
 
         if (! $dryRun) {
@@ -684,5 +684,143 @@ class ReEnrollmentService
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Quita del periodo a quien entró por la lista de 1° o por Nuevo ingreso.
+     * Si su inscripción quedó en el ciclo origen, la pasa al ciclo destino en el mismo grado y letra.
+     */
+    public function excludeIncomingIntakesFromPeriod(ReEnrollmentPeriod $period): void
+    {
+        $enrollments = $this->incomingIntakeEnrollments($period);
+        if ($enrollments->isEmpty()) {
+            return;
+        }
+
+        ReEnrollmentApplication::query()
+            ->where('re_enrollment_period_id', $period->id)
+            ->whereIn('enrollment_id', $enrollments->pluck('id'))
+            ->delete();
+
+        foreach ($enrollments as $enrollment) {
+            $this->relocateIncomingIntake($period, $enrollment);
+        }
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function incomingIntakeEnrollmentIds(ReEnrollmentPeriod $period): array
+    {
+        return $this->incomingIntakeEnrollments($period)->pluck('id')->all();
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Collection<int, Enrollment>
+     */
+    private function incomingIntakeEnrollments(ReEnrollmentPeriod $period)
+    {
+        return Enrollment::query()
+            ->with('classGroup.gradeLevel')
+            ->where('academic_year_id', $period->from_academic_year_id)
+            ->where('status', EnrollmentStatus::Active->value)
+            ->where(function (Builder $query) use ($period) {
+                $query->where('admission_channel', 'manual')
+                    ->orWhere(function (Builder $late) use ($period) {
+                        $late->where('admission_channel', 'late')
+                            ->where(function (Builder $converted) use ($period) {
+                                $converted->whereExists(function ($exists) use ($period) {
+                                    $exists->selectRaw('1')
+                                        ->from('pre_enrollments')
+                                        ->whereColumn('pre_enrollments.converted_enrollment_id', 'enrollments.id')
+                                        ->where('pre_enrollments.converted_at', '>=', $period->created_at);
+                                })->orWhereExists(function ($exists) use ($period) {
+                                    $exists->selectRaw('1')
+                                        ->from('pre_enrollments')
+                                        ->whereColumn('pre_enrollments.converted_student_id', 'enrollments.student_id')
+                                        ->where('pre_enrollments.converted_at', '>=', $period->created_at);
+                                });
+                            });
+                    });
+            })
+            ->get();
+    }
+
+    private function originActiveQuery(ReEnrollmentPeriod $period): Builder
+    {
+        $excludeIds = $this->incomingIntakeEnrollmentIds($period);
+
+        return Enrollment::query()
+            ->where('academic_year_id', $period->from_academic_year_id)
+            ->where('status', EnrollmentStatus::Active->value)
+            ->when($excludeIds !== [], fn (Builder $query) => $query->whereNotIn('id', $excludeIds));
+    }
+
+    private function relocateIncomingIntake(ReEnrollmentPeriod $period, Enrollment $enrollment): void
+    {
+        $alreadyInDestination = Enrollment::query()
+            ->where('student_id', $enrollment->student_id)
+            ->where('academic_year_id', $period->to_academic_year_id)
+            ->exists();
+        if ($alreadyInDestination) {
+            return;
+        }
+
+        $gradeName = (string) ($enrollment->classGroup?->gradeLevel?->name ?: '1°');
+        $letter = (string) ($enrollment->classGroup?->name ?: 'A');
+        $group = $this->ensureDestinationGroup($period->to_academic_year_id, $gradeName, $letter);
+
+        $enrollment->update([
+            'academic_year_id' => $period->to_academic_year_id,
+            'class_group_id' => $group->id,
+        ]);
+
+        $this->moveWorkshopEnrollment($enrollment->student_id, $period->from_academic_year_id, $period->to_academic_year_id);
+    }
+
+    private function moveWorkshopEnrollment(int $studentId, int $fromYearId, int $toYearId): void
+    {
+        $current = WorkshopEnrollment::query()
+            ->where('student_id', $studentId)
+            ->where('academic_year_id', $fromYearId)
+            ->first();
+        if (! $current) {
+            return;
+        }
+
+        $destination = WorkshopEnrollment::query()
+            ->where('student_id', $studentId)
+            ->where('academic_year_id', $toYearId)
+            ->first();
+        if ($destination) {
+            $current->delete();
+
+            return;
+        }
+
+        $current->update(['academic_year_id' => $toYearId]);
+    }
+
+    private function ensureDestinationGroup(int $academicYearId, string $gradeName, string $groupName): ClassGroup
+    {
+        $existing = ClassGroup::query()
+            ->where('academic_year_id', $academicYearId)
+            ->where('name', $groupName)
+            ->whereHas('gradeLevel', fn (Builder $query) => $query->where('name', $gradeName))
+            ->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        $grade = GradeLevel::query()->where('name', $gradeName)->first();
+        if (! $grade) {
+            throw new RuntimeException('No existe el grado '.$gradeName.' para colocar el nuevo ingreso.');
+        }
+
+        return ClassGroup::query()->create([
+            'academic_year_id' => $academicYearId,
+            'grade_level_id' => $grade->id,
+            'name' => $groupName,
+        ]);
     }
 }

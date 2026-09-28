@@ -2,18 +2,17 @@
 
 namespace App\Console\Commands\temporal;
 
-use App\Models\AcademicYear;
 use Illuminate\Console\Command;
 use Throwable;
 
 class ApplyFirstGradeRoster extends Command
 {
     protected $signature = 'admissions:apply-first-grade-roster
-                            {--file= : Ruta al Excel FORMATOS LISTAS 1°}
-                            {--year= : ID del ciclo escolar. Por defecto el ciclo activo}
-                            {--write : Actualiza preinscripciones, inscribe y asigna grupo y taller}';
+                            {--file= : Ruta al Excel DIRECTORIO PRIMEROS}
+                            {--year= : ID del ciclo destino. Por defecto el ciclo de reinscripción abierto}
+                            {--write : Actualiza preinscripciones, inscribe tardíos y asigna grupo y taller}';
 
-    protected $description = 'Actualiza 1° desde el directorio del Excel e inscribe grupo y taller. Sin --write solo simula.';
+    protected $description = 'Aplica el directorio de 1°: convierte preinscripciones, da de alta tardía a quienes no estaban e inscribe grupo y taller. Sin --write solo simula.';
 
     public function __construct(
         private readonly ApplyFirstGradeRosterService $roster
@@ -25,17 +24,14 @@ class ApplyFirstGradeRoster extends Command
     {
         @ini_set('memory_limit', '512M');
 
-        $yearId = (int) $this->option('year');
+        $yearId = ApplyFirstGradeRosterService::resolveYearId((int) $this->option('year'));
         if ($yearId <= 0) {
-            $yearId = (int) AcademicYear::query()->where('is_active', true)->value('id');
-        }
-        if ($yearId <= 0) {
-            $this->error('Indica --year o activa un ciclo escolar.');
+            $this->error('Indica --year o abre un periodo de reinscripción / ciclo activo.');
 
             return self::FAILURE;
         }
 
-        $path = (string) ($this->option('file') ?: $this->defaultFile());
+        $path = (string) ($this->option('file') ?: ApplyFirstGradeRosterService::resolveDefaultFile());
         if ($path === '') {
             $this->error('No se encontró el Excel. Pásalo con --file.');
 
@@ -56,13 +52,21 @@ class ApplyFirstGradeRoster extends Command
             ? 'Simulación. Nada se escribió. Usa --write para aplicarlo una vez.'
             : 'Lista aplicada.');
         $this->line('Archivo: '.$path);
+        $this->line('Ciclo destino: '.$summary['academic_year_label'].' (id '.$summary['academic_year_id'].')');
         $this->line('Filas del directorio: '.$summary['rows']);
-        $this->line('Con preinscripción: '.$summary['matched']);
+        $this->line('En preinscripción: '.$summary['in_pre']);
+        $this->line('En listas y no en preinscripción: '.$summary['not_in_pre_count']);
+        $this->line('  Ya eran alumnos (se inscriben en destino): '.count($summary['placed_existing']));
+        $this->line('  Altas tardías nuevas: '.count($summary['created_late']));
+        $this->line('Ya en 1° destino (pasados): '.count($summary['already_in_first']));
+        $this->line('Por convertir desde preinscripción: '.count($summary['converted']));
         $this->line('CURP corregida por nombre idéntico: '.$summary['near_matches']);
         $this->line($dryRun
-            ? 'Se inscribirían: '.$summary['matched']
-            : 'Inscritos: '.$summary['applied']);
-        $this->line('Sin preinscripción u omitidos: '.count($summary['skipped']));
+            ? 'Se procesarían: '.count($summary['planned'])
+            : 'Procesados: '.$summary['applied']);
+        $this->line('1° destino que no aparecen en las listas: '.count($summary['dest_first_not_on_list']));
+        $this->line('1° origen que no aparecen en las listas: '.count($summary['origin_first_not_on_list']));
+        $this->line('Omitidos: '.count($summary['skipped']));
         $this->line('Errores: '.count($summary['errors']));
 
         $workshops = [];
@@ -78,10 +82,15 @@ class ApplyFirstGradeRoster extends Command
             $this->line('Talleres: '.collect($workshops)->map(fn ($count, $name) => $name.'='.$count)->implode(', '));
         }
 
-        $this->comment('La fecha de nacimiento del Excel no se copia: se conserva la de la preinscripción.');
+        $this->comment('La fecha de nacimiento del Excel no se copia: se conserva la de la preinscripción o la de la CURP en altas nuevas.');
         $this->comment('Ofimática es taller interno y no aparece en el formulario de preinscripción.');
 
-        $this->printManualAdds($summary['manual_adds']);
+        $this->printPeople('En listas y no en preinscripción', $summary['manual_adds']);
+        $this->printPeople('Altas tardías nuevas', $summary['created_late']);
+        $this->printPeople('Ya eran alumnos y se inscriben en 1° destino', $summary['placed_existing']);
+        $this->printPeople('Ya en 1° destino (pasados)', $summary['already_in_first']);
+        $this->printPeople('1° destino que no aparecen en las listas', $summary['dest_first_not_on_list']);
+        $this->printPeople('1° origen que no aparecen en las listas', $summary['origin_first_not_on_list']);
         $this->printCurpComparisons($summary['curp_comparisons']);
         $this->printAgeMismatches($summary['age_mismatches']);
 
@@ -95,27 +104,13 @@ class ApplyFirstGradeRoster extends Command
         return $summary['errors'] === [] ? self::SUCCESS : self::FAILURE;
     }
 
-    private function defaultFile(): string
-    {
-        $directory = storage_path('app/temp/listasExcel');
-        $matches = glob($directory.DIRECTORY_SEPARATOR.'*.xlsx') ?: [];
-        foreach ($matches as $file) {
-            $name = basename($file);
-            if (str_contains($name, '26-27') && str_contains($name, '(1)')) {
-                return $file;
-            }
-        }
-
-        return '';
-    }
-
     /**
-     * @param  list<array{row: string, curp: string, name: string, group: string, tech: string, reason: string}>  $rows
+     * @param  list<array<string, string>>  $rows
      */
-    private function printManualAdds(array $rows): void
+    private function printPeople(string $title, array $rows): void
     {
         $this->newLine();
-        $this->warn('Alumnos que no estaban en la preinscripción ('.count($rows).'). Agregarlos a mano:');
+        $this->warn($title.' ('.count($rows).'):');
         if ($rows === []) {
             $this->line('  Ninguno.');
 
@@ -126,10 +121,10 @@ class ApplyFirstGradeRoster extends Command
             $this->line(sprintf(
                 '  %d. %s | CURP %s | grupo %s | %s',
                 $index + 1,
-                $row['name'],
-                $row['curp'],
-                $row['group'] !== '' ? $row['group'] : '—',
-                $row['tech'] !== '' ? $row['tech'] : 'sin taller'
+                $row['name'] ?? '—',
+                $row['curp'] ?? '—',
+                ($row['group'] ?? '') !== '' ? $row['group'] : '—',
+                $row['tech'] ?? ($row['reason'] ?? '')
             ));
         }
     }

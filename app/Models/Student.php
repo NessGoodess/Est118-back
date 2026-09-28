@@ -16,7 +16,17 @@ class Student extends Model
     protected $fillable = [
         'profile_id',
         'credential_id',
+        'place_of_birth',
+        'previous_school',
+        'current_average',
+        'school_voucher_folio',
     ];
+
+    public function siblings(): BelongsToMany
+    {
+        return $this->belongsToMany(Student::class, 'student_siblings', 'student_id', 'sibling_student_id')
+            ->withTimestamps();
+    }
 
     /**
      * Get the profile associated with the Student

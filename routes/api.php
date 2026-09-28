@@ -23,6 +23,7 @@ use App\Http\Controllers\Export\StudentExportController;
 use App\Http\Controllers\FirstGradeGroupAssignmentController;
 use App\Http\Controllers\FirstGradeWorkshopAssignmentController;
 use App\Http\Controllers\GeneralAttendanceController;
+use App\Http\Controllers\NewIntakeController;
 use App\Http\Controllers\NfcCredentialController;
 use App\Http\Controllers\NfcReaderSlotController;
 use App\Http\Controllers\NotificationController;
@@ -212,6 +213,12 @@ Route::post('/telegram/webhook', [TelegramController::class, 'webhook']);
 
 Route::get('/workshops', [WorkshopController::class, 'index'])
     ->middleware(['auth:sanctum', 'verified']);
+
+Route::middleware(['auth:sanctum', 'verified'])->prefix('new-intakes')->group(function () {
+    Route::get('/options', [NewIntakeController::class, 'options']);
+    Route::get('/students', [NewIntakeController::class, 'search']);
+    Route::post('/', [NewIntakeController::class, 'store']);
+});
 
 Route::get('/workshop-offerings', [WorkshopOfferingController::class, 'index'])
     ->middleware(['auth:sanctum', 'verified']);

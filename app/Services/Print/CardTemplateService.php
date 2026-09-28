@@ -488,6 +488,7 @@ class CardTemplateService
                 'x' => (int) ($field['x'] ?? 0),
                 'y' => (int) ($field['y'] ?? 0),
                 'w' => max(48, (int) ($field['w'] ?? 420)),
+                'h' => max(0, (int) ($field['h'] ?? 0)),
                 'size' => (float) ($field['size'] ?? 20),
                 'bold' => (bool) ($field['bold'] ?? false),
                 'color' => (string) ($field['color'] ?? ($face['text'] ?? '#111111')),
@@ -498,6 +499,10 @@ class CardTemplateService
                 'align' => in_array(($field['align'] ?? 'left'), ['left', 'center', 'right'], true)
                     ? (string) $field['align']
                     : 'left',
+                'valign' => in_array(($field['valign'] ?? 'top'), ['top', 'middle', 'bottom'], true)
+                    ? (string) $field['valign']
+                    : 'top',
+                'rotate' => $this->normalizeRotate($field['rotate'] ?? 0),
             ];
         }
 
@@ -656,6 +661,7 @@ class CardTemplateService
                 'stroke' => (string) ($item['stroke'] ?? ''),
                 'stroke_width' => max(0, min(32, (int) ($item['stroke_width'] ?? 0))),
                 'radius' => max(0, (int) ($item['radius'] ?? 0)),
+                'rotate' => $this->normalizeRotate($item['rotate'] ?? 0),
             ];
         }
 
@@ -687,6 +693,7 @@ class CardTemplateService
             'border_color' => (string) ($photo['border_color'] ?? '#FFFFFF'),
             'border_width' => max(1, min(32, (int) ($photo['border_width'] ?? 4))),
             'radius' => max(0, (int) ($photo['radius'] ?? 0)),
+            'rotate' => $this->normalizeRotate($photo['rotate'] ?? 0),
         ];
     }
 
@@ -702,6 +709,7 @@ class CardTemplateService
             'size' => max(32, (int) ($qr['size'] ?? 120)),
             'color' => (string) ($qr['color'] ?? '#000000'),
             'background' => (string) ($qr['background'] ?? '#FFFFFF'),
+            'rotate' => $this->normalizeRotate($qr['rotate'] ?? 0),
         ];
     }
 
@@ -744,5 +752,15 @@ class CardTemplateService
     private function assertSide(string $side): string
     {
         return $side === 'back' ? 'back' : 'front';
+    }
+
+    private function normalizeRotate(mixed $value): float
+    {
+        $deg = fmod((float) $value, 360.0);
+        if ($deg < 0) {
+            $deg += 360.0;
+        }
+
+        return $deg;
     }
 }

@@ -198,17 +198,31 @@ class StudentCardRenderService
             if ($kind === 'photo') {
                 $photoBox = $face['photo'] ?? null;
                 if (is_array($photoBox)) {
-                    $this->drawPhoto(
+                    $x = (int) ($photoBox['x'] ?? 60);
+                    $y = (int) ($photoBox['y'] ?? 120);
+                    $w = (int) ($photoBox['w'] ?? 280);
+                    $h = (int) ($photoBox['h'] ?? 360);
+                    $this->withRotation(
                         $img,
-                        $studentId,
-                        (int) ($photoBox['x'] ?? 60),
-                        (int) ($photoBox['y'] ?? 120),
-                        (int) ($photoBox['w'] ?? 280),
-                        (int) ($photoBox['h'] ?? 360),
-                        (bool) ($photoBox['border'] ?? true),
-                        max(0, (int) ($photoBox['radius'] ?? 0)),
-                        (string) ($photoBox['border_color'] ?? '#FFFFFF'),
-                        max(1, min(32, (int) ($photoBox['border_width'] ?? 4)))
+                        $x,
+                        $y,
+                        $w,
+                        $h,
+                        (float) ($photoBox['rotate'] ?? 0),
+                        function ($target, $dx, $dy) use ($studentId, $photoBox, $w, $h) {
+                            $this->drawPhoto(
+                                $target,
+                                $studentId,
+                                $dx,
+                                $dy,
+                                $w,
+                                $h,
+                                (bool) ($photoBox['border'] ?? true),
+                                max(0, (int) ($photoBox['radius'] ?? 0)),
+                                (string) ($photoBox['border_color'] ?? '#FFFFFF'),
+                                max(1, min(32, (int) ($photoBox['border_width'] ?? 4)))
+                            );
+                        }
                     );
                 }
                 continue;
@@ -216,14 +230,27 @@ class StudentCardRenderService
             if ($kind === 'qr') {
                 $qrBox = $face['qr'] ?? null;
                 if (is_array($qrBox)) {
-                    $this->drawQr(
+                    $x = (int) ($qrBox['x'] ?? 0);
+                    $y = (int) ($qrBox['y'] ?? 0);
+                    $size = max(32, (int) ($qrBox['size'] ?? 120));
+                    $this->withRotation(
                         $img,
-                        (string) ($payload['curp'] ?? ''),
-                        (int) ($qrBox['x'] ?? 0),
-                        (int) ($qrBox['y'] ?? 0),
-                        max(32, (int) ($qrBox['size'] ?? 120)),
-                        (string) ($qrBox['color'] ?? '#000000'),
-                        (string) ($qrBox['background'] ?? '#FFFFFF')
+                        $x,
+                        $y,
+                        $size,
+                        $size,
+                        (float) ($qrBox['rotate'] ?? 0),
+                        function ($target, $dx, $dy) use ($payload, $qrBox, $size) {
+                            $this->drawQr(
+                                $target,
+                                (string) ($payload['curp'] ?? ''),
+                                $dx,
+                                $dy,
+                                $size,
+                                (string) ($qrBox['color'] ?? '#000000'),
+                                (string) ($qrBox['background'] ?? '#FFFFFF')
+                            );
+                        }
                     );
                 }
                 continue;
@@ -272,17 +299,28 @@ class StudentCardRenderService
         $align = in_array(($field['align'] ?? 'left'), ['left', 'center', 'right'], true)
             ? (string) $field['align']
             : 'left';
+        $valign = in_array(($field['valign'] ?? 'top'), ['top', 'middle', 'bottom'], true)
+            ? (string) $field['valign']
+            : 'top';
+        $x = (int) ($field['x'] ?? 0);
+        $y = (int) ($field['y'] ?? 0);
+        $w = max(48, (int) ($field['w'] ?? 0));
+        $size = (float) ($field['size'] ?? 22);
+        $fontPath = CardFonts::resolvePath($bold ? $boldFile : $regular);
+        $contentH = $this->textBlockHeight($text, $size, $fontPath, $w);
+        $h = max($contentH, max(0, (int) ($field['h'] ?? 0)), 32);
+        $color = $this->hexToColor($img, (string) ($field['color'] ?? $defaultColor));
 
-        $this->drawText(
+        $this->withRotation(
             $img,
-            $text,
-            (int) ($field['x'] ?? 0),
-            (int) ($field['y'] ?? 0),
-            (float) ($field['size'] ?? 22),
-            $this->hexToColor($img, (string) ($field['color'] ?? $defaultColor)),
-            CardFonts::resolvePath($bold ? $boldFile : $regular),
-            max(48, (int) ($field['w'] ?? 0)),
-            $align
+            $x,
+            $y,
+            $w,
+            $h,
+            (float) ($field['rotate'] ?? 0),
+            function ($target, $dx, $dy) use ($text, $size, $color, $fontPath, $w, $h, $align, $valign) {
+                $this->drawText($target, $text, $dx, $dy, $size, $color, $fontPath, $w, $align, $valign, $h);
+            }
         );
     }
 
@@ -361,6 +399,25 @@ class StudentCardRenderService
         $y = (int) ($graphic['y'] ?? 0);
         $w = max(8, (int) ($graphic['w'] ?? 80));
         $h = max(8, (int) ($graphic['h'] ?? 80));
+        $this->withRotation(
+            $img,
+            $x,
+            $y,
+            $w,
+            $h,
+            (float) ($graphic['rotate'] ?? 0),
+            function ($target, $dx, $dy) use ($templateDir, $graphic, $w, $h) {
+                $this->drawGraphicAt($target, $templateDir, $graphic, $dx, $dy, $w, $h);
+            }
+        );
+    }
+
+    /**
+     * @param  \GdImage|resource  $img
+     * @param  array<string, mixed>  $graphic
+     */
+    private function drawGraphicAt($img, string $templateDir, array $graphic, int $x, int $y, int $w, int $h): void
+    {
         $kind = (string) ($graphic['kind'] ?? 'rect');
 
         if ($kind === 'image') {
@@ -665,7 +722,9 @@ class StudentCardRenderService
         int $color,
         string $fontPath,
         int $maxWidth = 0,
-        string $align = 'left'
+        string $align = 'left',
+        string $valign = 'top',
+        int $boxHeight = 0
     ): void {
         if (is_file($fontPath) && function_exists('imagettftext')) {
             $lines = $maxWidth > 0
@@ -674,7 +733,16 @@ class StudentCardRenderService
             $metrics = $this->fontLineMetrics($size, $fontPath);
             $lineHeight = $size * 1.1;
             $leading = $lineHeight - ($metrics['ascent'] + $metrics['descent']);
-            $baseY = $y + $metrics['ascent'] + ($leading / 2);
+            $contentH = count($lines) * $lineHeight;
+            $offsetY = 0.0;
+            if ($boxHeight > 0 && $contentH < $boxHeight) {
+                if ($valign === 'middle') {
+                    $offsetY = ($boxHeight - $contentH) / 2;
+                } elseif ($valign === 'bottom') {
+                    $offsetY = $boxHeight - $contentH;
+                }
+            }
+            $baseY = $y + $offsetY + $metrics['ascent'] + ($leading / 2);
 
             foreach ($lines as $index => $line) {
                 $ink = $this->textInkBox($line === '' ? ' ' : $line, $size, $fontPath);
@@ -688,7 +756,7 @@ class StudentCardRenderService
                 }
                 imagettftext(
                     $img,
-                    $size,
+                    $this->ttfSize($size),
                     0,
                     (int) round($lineX - $ink['left']),
                     (int) round($baseY + ($index * $lineHeight)),
@@ -710,7 +778,7 @@ class StudentCardRenderService
     private function fontLineMetrics(float $size, string $fontPath): array
     {
         $box = function_exists('imagettfbbox')
-            ? @imagettfbbox($size, 0, $fontPath, 'HgÁÿ|Éj')
+            ? @imagettfbbox($this->ttfSize($size), 0, $fontPath, 'HgÁÿ|Éj')
             : false;
         if ($box === false) {
             return ['ascent' => $size * 0.8, 'descent' => $size * 0.2];
@@ -732,7 +800,7 @@ class StudentCardRenderService
 
             return ['left' => 0.0, 'width' => $guess];
         }
-        $box = imagettfbbox($size, 0, $fontPath, $text);
+        $box = imagettfbbox($this->ttfSize($size), 0, $fontPath, $text);
         if ($box === false) {
             $guess = mb_strlen($text) * $size * 0.55;
 
@@ -830,12 +898,20 @@ class StudentCardRenderService
         return $lines !== [] ? $lines : [$token];
     }
 
+    /**
+     * GD treats TTF sizes as points at 96 dpi; layout sizes are CSS pixels.
+     */
+    private function ttfSize(float $px): float
+    {
+        return $px * 0.75;
+    }
+
     private function textWidth(string $text, float $size, string $fontPath): float
     {
         if ($text === '' || ! function_exists('imagettfbbox') || ! is_file($fontPath)) {
             return mb_strlen($text) * $size * 0.55;
         }
-        $box = imagettfbbox($size, 0, $fontPath, $text);
+        $box = imagettfbbox($this->ttfSize($size), 0, $fontPath, $text);
         if ($box === false) {
             return mb_strlen($text) * $size * 0.55;
         }
@@ -864,5 +940,69 @@ class StudentCardRenderService
         $converted = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
 
         return $converted !== false ? $converted : preg_replace('/[^\x20-\x7E]/', '?', $text) ?? $text;
+    }
+
+    private function textBlockHeight(string $text, float $size, string $fontPath, int $maxWidth): int
+    {
+        $lines = $maxWidth > 0
+            ? $this->wrapText($text, $size, $fontPath, $maxWidth)
+            : (preg_split("/\r\n|\n|\r/", $text) ?: [$text]);
+
+        return max(32, (int) round(count($lines) * $size * 1.1 + 6));
+    }
+
+    /**
+     * @param  \GdImage|resource  $dest
+     * @param  callable(\GdImage|resource, int, int): void  $draw
+     */
+    private function withRotation($dest, int $x, int $y, int $w, int $h, float $deg, callable $draw): void
+    {
+        $w = max(1, $w);
+        $h = max(1, $h);
+        $deg = fmod($deg, 360.0);
+        if ($deg < 0) {
+            $deg += 360.0;
+        }
+        if ($deg < 0.5 || $deg > 359.5) {
+            $draw($dest, $x, $y);
+
+            return;
+        }
+
+        $tmp = imagecreatetruecolor($w, $h);
+        if ($tmp === false) {
+            $draw($dest, $x, $y);
+
+            return;
+        }
+        imagealphablending($tmp, false);
+        imagesavealpha($tmp, true);
+        $clear = imagecolorallocatealpha($tmp, 0, 0, 0, 127);
+        imagefilledrectangle($tmp, 0, 0, $w, $h, $clear);
+        imagealphablending($tmp, true);
+        $draw($tmp, 0, 0);
+
+        $rotated = imagerotate($tmp, -$deg, $clear);
+        imagedestroy($tmp);
+        if ($rotated === false) {
+            $draw($dest, $x, $y);
+
+            return;
+        }
+        imagealphablending($rotated, true);
+        imagesavealpha($rotated, true);
+        $rw = imagesx($rotated);
+        $rh = imagesy($rotated);
+        imagecopy(
+            $dest,
+            $rotated,
+            (int) round($x + $w / 2 - $rw / 2),
+            (int) round($y + $h / 2 - $rh / 2),
+            0,
+            0,
+            $rw,
+            $rh
+        );
+        imagedestroy($rotated);
     }
 }

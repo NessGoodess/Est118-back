@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Print;
 
+use App\Enums\PrintBatchStrategy;
 use App\Enums\ServiceAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Print\StorePrintJobsRequest;
 use App\Models\PrintJob;
 use App\Models\User;
+use App\Services\Print\CredentialPrintService;
 use App\Services\Print\PrintJobService;
 use App\Services\Print\StudentCardRenderService;
 use Illuminate\Http\JsonResponse;
@@ -18,7 +20,8 @@ class PrintJobController extends Controller
 {
     public function __construct(
         private readonly PrintJobService $printJobs,
-        private readonly StudentCardRenderService $renderer
+        private readonly StudentCardRenderService $renderer,
+        private readonly CredentialPrintService $credentialPrints
     ) {}
 
     public function preview(Request $request): Response|JsonResponse
@@ -64,6 +67,13 @@ class PrintJobController extends Controller
             $filters
         );
 
+        $paginator->getCollection()->load([
+            'student.profile:id,first_name,last_name',
+            'creator:id,name',
+            'canceller:id,name',
+            'credentialPrint',
+        ]);
+
         return response()->json([
             'success' => true,
             'data' => collect($paginator->items())->map(fn (PrintJob $j) => $this->serialize($j))->values(),
@@ -98,17 +108,27 @@ class PrintJobController extends Controller
     public function store(StorePrintJobsRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $jobs = $this->printJobs->createJobs(
+        if (($data['side_mode'] ?? 'front') === 'back') {
+            throw ValidationException::withMessages([
+                'side_mode' => ['Los reversos se encolan desde /credential-prints/enqueue.'],
+            ]);
+        }
+
+        $batch = $this->credentialPrints->createBatch(
             $data['student_ids'],
             $request->user(),
-            $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID,
             $data['template_key'] ?? 'student-card-v1',
-            $data['side_mode'] ?? 'front'
+            PrintBatchStrategy::FrontsThenBacks,
+            $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID
         );
+
+        $jobs = $batch['cards']
+            ->flatMap(fn ($card) => $card->printJobs)
+            ->values();
 
         return response()->json([
             'success' => true,
-            'data' => collect($jobs)->map(fn (PrintJob $j) => $this->serialize($j))->values(),
+            'data' => $jobs->map(fn (PrintJob $j) => $this->serialize($j))->values(),
         ], 201);
     }
 
@@ -146,7 +166,7 @@ class PrintJobController extends Controller
     public function cancelQueue(Request $request): JsonResponse
     {
         $printerId = (string) $request->input('printer_id', PrintJobService::DEFAULT_PRINTER_ID);
-        $jobs = $this->printJobs->cancelQueue($printerId);
+        $jobs = $this->printJobs->cancelQueue($printerId, $request->user());
 
         return response()->json([
             'success' => true,
@@ -175,7 +195,7 @@ class PrintJobController extends Controller
 
     public function cancel(PrintJob $printJob): JsonResponse
     {
-        $job = $this->printJobs->cancel($printJob);
+        $job = $this->printJobs->cancel($printJob, $request->user());
 
         return response()->json([
             'success' => true,
@@ -230,36 +250,15 @@ class PrintJobController extends Controller
         ], 201);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
     private function serialize(PrintJob $job): array
     {
-        $profile = $job->student?->profile;
+        $job->loadMissing([
+            'student.profile:id,first_name,last_name',
+            'creator:id,name',
+            'canceller:id,name',
+            'credentialPrint',
+        ]);
 
-        return [
-            'id' => $job->id,
-            'uuid' => $job->uuid,
-            'student_id' => $job->student_id,
-            'student_name' => $profile
-                ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
-                : null,
-            'printer_id' => $job->printer_id,
-            'template_key' => $job->template_key,
-            'design_key' => $job->payload_json['design_key'] ?? $job->template_key,
-            'design_label' => $job->payload_json['design_label'] ?? null,
-            'faces_mode' => $job->payload_json['faces_mode']
-                ?? $job->cardDesign?->faces_mode
-                ?? 'single',
-            'side_mode' => $job->side_mode,
-            'status' => $job->status instanceof \BackedEnum ? $job->status->value : (string) $job->status,
-            'payload' => $job->payload_json,
-            'attempts' => $job->attempts,
-            'last_error' => $job->last_error,
-            'claimed_by' => $job->claimed_by,
-            'claimed_at' => $job->claimed_at?->toIso8601String(),
-            'completed_at' => $job->completed_at?->toIso8601String(),
-            'created_at' => $job->created_at?->toIso8601String(),
-        ];
+        return CredentialPrintController::serializeJob($job);
     }
 }

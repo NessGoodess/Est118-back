@@ -65,6 +65,11 @@ class CardDesign extends Model
         return $this->hasMany(PrintJob::class);
     }
 
+    public function credentialPrints(): HasMany
+    {
+        return $this->hasMany(CredentialPrint::class);
+    }
+
     public function storageDir(): string
     {
         return storage_path('app/card-templates/'.$this->uuid);

@@ -161,6 +161,8 @@ class CredentialPrintingService
             'student_id' => $student->id,
             'credential_id' => $student->credential_id,
             'full_name' => $fullName,
+            'name' => trim($profile->first_name ?? ''),
+            'last_name' => trim($profile->last_name ?? ''),
             'grade' => $grade,
             'group' => $group,
             'workshop_names' => $workshopNames,

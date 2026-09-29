@@ -12,6 +12,7 @@ class PrintJob extends Model
     protected $fillable = [
         'uuid',
         'student_id',
+        'credential_print_id',
         'printer_id',
         'template_key',
         'card_design_id',
@@ -29,6 +30,8 @@ class PrintJob extends Model
         'max_attempts',
         'last_error',
         'created_by',
+        'cancelled_by',
+        'cancelled_at',
         'academic_year_id',
     ];
 
@@ -43,6 +46,7 @@ class PrintJob extends Model
             'claimed_at' => 'datetime',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
+            'cancelled_at' => 'datetime',
         ];
     }
 
@@ -65,9 +69,19 @@ class PrintJob extends Model
         return $this->belongsTo(Student::class);
     }
 
+    public function credentialPrint(): BelongsTo
+    {
+        return $this->belongsTo(CredentialPrint::class);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 
     public function cardDesign(): BelongsTo

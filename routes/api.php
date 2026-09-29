@@ -35,6 +35,7 @@ use App\Http\Controllers\School\ReEnrollmentPeriodController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\StudentCredentialPrintingController;
 use App\Http\Controllers\Print\CardTemplateController;
+use App\Http\Controllers\Print\CredentialPrintController;
 use App\Http\Controllers\Print\PrintAgentController;
 use App\Http\Controllers\Print\PrintJobController;
 use App\Http\Controllers\Print\Zc300AgentDownloadController;
@@ -132,6 +133,10 @@ Route::prefix('agent')->middleware([
     Route::get('/print-jobs/{printJob}/assets/back', [PrintAgentController::class, 'backAsset']);
 });
 
+/**
+ * Print Jobs
+ * ___________________________________________________________________________
+ */
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('/print-jobs', [PrintJobController::class, 'index'])
         ->middleware('permission:view students');
@@ -157,6 +162,27 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('permission:view students');
     Route::post('/print-agent/token', [PrintJobController::class, 'issueAgentToken'])
         ->middleware('role:admin');
+
+    /**
+     * Credential Prints
+     * ___________________________________________________________________________
+     */
+    Route::get('/credential-prints', [CredentialPrintController::class, 'index'])
+        ->middleware('permission:view students');
+    Route::get('/credential-prints/pending', [CredentialPrintController::class, 'pending'])
+        ->middleware('permission:view students');
+    Route::get('/credential-prints/latest-by-students', [CredentialPrintController::class, 'latestByStudents'])
+        ->middleware('permission:view students');
+    Route::get('/credential-prints/batches/{batchUuid}', [CredentialPrintController::class, 'batch'])
+        ->middleware('permission:view students');
+    Route::post('/credential-prints', [CredentialPrintController::class, 'store'])
+        ->middleware('permission:edit students');
+    Route::post('/credential-prints/enqueue', [CredentialPrintController::class, 'enqueue'])
+        ->middleware('permission:edit students');
+    Route::post('/credential-prints/discard', [CredentialPrintController::class, 'discard'])
+        ->middleware('permission:edit students');
+    Route::post('/credential-prints/mark-side', [CredentialPrintController::class, 'markSide'])
+        ->middleware('permission:edit students');
 
     Route::get('/card-templates', [CardTemplateController::class, 'index'])
         ->middleware('permission:view students');

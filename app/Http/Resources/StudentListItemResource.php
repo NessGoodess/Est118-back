@@ -17,7 +17,7 @@ class StudentListItemResource extends JsonResource
         /** @var \App\Models\Student $student */
         $student = $this->resource;
         $enrollment = $student->enrollments->first(
-            fn ($row) => ($row->status?->value ?? $row->status) === 'active'
+            fn($row) => ($row->status?->value ?? $row->status) === 'active'
         ) ?? $student->enrollments->first();
         $photos = app(StudentPhotoPathService::class);
 
@@ -32,7 +32,8 @@ class StudentListItemResource extends JsonResource
         return [
             'id' => $student->id,
             'credential_id' => $student->credential_id,
-            'name' => trim(($student->profile?->first_name ?? '') . ' ' . ($student->profile?->last_name ?? '')),
+            'name' => trim($student->profile?->first_name ?? ''),
+            'last_name' => trim($student->profile?->last_name ?? ''),
             'birth_date' => $student->profile?->birth_date,
             'gender' => $student->profile?->gender,
             'phone' => $student->profile?->phone_number,

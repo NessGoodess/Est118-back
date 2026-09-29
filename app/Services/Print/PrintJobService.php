@@ -3,12 +3,13 @@
 namespace App\Services\Print;
 
 use App\Enums\EnrollmentStatus;
+use App\Enums\PrintBatchStrategy;
 use App\Enums\PrintJobStatus;
 use App\Jobs\RenderStudentCardJob;
 use App\Models\CardDesign;
+use App\Models\CredentialPrint;
 use App\Models\PrintJob;
 use App\Models\Student;
-use App\Models\StudentCredentialTracking;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
@@ -29,8 +30,58 @@ class PrintJobService
     ) {}
 
     /**
+     * Create a single side job for an existing credential print card.
+     */
+    public function createJobForCard(
+        CredentialPrint $card,
+        User $creator,
+        string $sideMode = 'front',
+        string $printerId = self::DEFAULT_PRINTER_ID
+    ): PrintJob {
+        $student = $this->studentForPrint((int) $card->student_id);
+        $design = $card->cardDesign ?? CardDesign::query()->find($card->card_design_id);
+        if (! $design) {
+            throw ValidationException::withMessages([
+                'card_design_id' => ['La tarjeta no tiene un diseño asociado.'],
+            ]);
+        }
+
+        $facesMode = ($card->faces_mode ?? $design->faces_mode ?? 'single') === 'double' ? 'double' : 'single';
+        $resolvedSide = $this->resolveSideMode($sideMode, $facesMode);
+
+        $enrollment = $student->currentEnrollment
+            ?? $student->enrollments()->where('status', EnrollmentStatus::Active)->first();
+
+        $orientation = $design->orientation === 'portrait' ? 'portrait' : 'landscape';
+        $payload = $this->cards->payloadFromStudent($student);
+        $payload['orientation'] = $orientation;
+        $payload['faces_mode'] = $facesMode;
+        $payload['design_key'] = $design->uuid;
+        $payload['design_label'] = $design->name;
+
+        $job = PrintJob::query()->create([
+            'student_id' => $student->id,
+            'credential_print_id' => $card->id,
+            'printer_id' => $printerId,
+            'template_key' => $design->uuid,
+            'card_design_id' => $design->id,
+            'side_mode' => $resolvedSide,
+            'status' => PrintJobStatus::Pending,
+            'payload_json' => $payload,
+            'created_by' => $creator->id,
+            'academic_year_id' => $card->academic_year_id ?? $enrollment?->academic_year_id,
+        ]);
+
+        RenderStudentCardJob::dispatchSync($job->id);
+
+        return $job->fresh() ?? $job;
+    }
+
+    /**
      * @param  array<int, int>  $studentIds
      * @return array<int, PrintJob>
+     *
+     * @deprecated Use CredentialPrintService::createBatch
      */
     public function createJobs(
         array $studentIds,
@@ -39,50 +90,25 @@ class PrintJobService
         string $templateKey = 'student-card-v1',
         string $sideMode = 'front'
     ): array {
-        $studentIds = array_values(array_unique(array_map('intval', $studentIds)));
-        if ($studentIds === []) {
+        if ($sideMode === 'back') {
             throw ValidationException::withMessages([
-                'student_ids' => ['Se requiere al menos un alumno.'],
+                'side_mode' => ['Los reversos se encolan desde el lote de tarjetas, no desde este endpoint.'],
             ]);
         }
 
-        $jobs = [];
+        $batch = app(CredentialPrintService::class)->createBatch(
+            $studentIds,
+            $creator,
+            $templateKey,
+            PrintBatchStrategy::FrontsThenBacks,
+            $printerId
+        );
 
-        DB::transaction(function () use ($studentIds, $creator, $printerId, $templateKey, $sideMode, &$jobs) {
-            foreach ($studentIds as $studentId) {
-                $student = $this->loadStudentForPrint($studentId);
-                $design = $this->resolveDesignForStudent($student, $templateKey);
-                $facesMode = ($design->faces_mode ?? 'single') === 'double' ? 'double' : 'single';
-                $resolvedSide = $this->resolveSideMode($sideMode, $facesMode);
-
-                $enrollment = $student->currentEnrollment
-                    ?? $student->enrollments()->where('status', EnrollmentStatus::Active)->first();
-
-                $orientation = $design->orientation === 'portrait' ? 'portrait' : 'landscape';
-                $payload = $this->cards->payloadFromStudent($student);
-                $payload['orientation'] = $orientation;
-                $payload['faces_mode'] = $facesMode;
-                $payload['design_key'] = $design->uuid;
-                $payload['design_label'] = $design->name;
-
-                $job = PrintJob::query()->create([
-                    'student_id' => $student->id,
-                    'printer_id' => $printerId,
-                    'template_key' => $design->uuid,
-                    'card_design_id' => $design->id,
-                    'side_mode' => $resolvedSide,
-                    'status' => PrintJobStatus::Pending,
-                    'payload_json' => $payload,
-                    'created_by' => $creator->id,
-                    'academic_year_id' => $enrollment?->academic_year_id,
-                ]);
-
-                $jobs[] = $job;
-                RenderStudentCardJob::dispatchSync($job->id);
-            }
-        });
-
-        return $jobs;
+        return $batch['cards']
+            ->map(fn (CredentialPrint $card) => $card->printJobs->sortBy('id')->last())
+            ->filter()
+            ->values()
+            ->all();
     }
 
     /**
@@ -181,7 +207,7 @@ class PrintJobService
         return $latest;
     }
 
-    public function cancel(PrintJob $job): PrintJob
+    public function cancel(PrintJob $job, ?User $actor = null): PrintJob
     {
         if (in_array($job->status, [PrintJobStatus::Completed, PrintJobStatus::Cancelled], true)) {
             throw ValidationException::withMessages([
@@ -189,12 +215,18 @@ class PrintJobService
             ]);
         }
 
-        $job->update([
-            'status' => PrintJobStatus::Cancelled,
-            'last_error' => 'Cancelado por administrador',
-        ]);
+        return DB::transaction(function () use ($job, $actor) {
+            $job->update([
+                'status' => PrintJobStatus::Cancelled,
+                'last_error' => 'Cancelado por administrador',
+                'cancelled_by' => $actor?->id,
+                'cancelled_at' => now(),
+            ]);
+            $fresh = $job->fresh() ?? $job;
+            $this->syncCard($fresh);
 
-        return $job->fresh();
+            return $fresh;
+        });
     }
 
     public function claimNext(string $printerId, string $agentId): ?PrintJob
@@ -253,15 +285,17 @@ class PrintJobService
 
     public function markCompleted(PrintJob $job): PrintJob
     {
-        $job->update([
-            'status' => PrintJobStatus::Completed,
-            'completed_at' => now(),
-            'last_error' => null,
-        ]);
+        return DB::transaction(function () use ($job) {
+            $job->update([
+                'status' => PrintJobStatus::Completed,
+                'completed_at' => now(),
+                'last_error' => null,
+            ]);
+            $fresh = $job->fresh() ?? $job;
+            $this->syncCard($fresh);
 
-        $this->markCredentialPrinted($job);
-
-        return $job->fresh();
+            return $fresh;
+        });
     }
 
     public function markFailed(PrintJob $job, string $error): PrintJob
@@ -277,11 +311,16 @@ class PrintJobService
             'attempts' => $media ? max(0, $job->attempts - 1) : $job->attempts,
         ]);
 
+        $fresh = $job->fresh() ?? $job;
+        if (! $retry) {
+            $this->syncCard($fresh);
+        }
+
         if ($media) {
             $this->pauseQueue((string) $job->printer_id, $error);
         }
 
-        return $job->fresh();
+        return $fresh;
     }
 
     public function recordHeartbeat(string $printerId, string $agentId, array $meta = []): array
@@ -397,31 +436,37 @@ class PrintJobService
     /**
      * @return array<int, PrintJob>
      */
-    public function cancelQueue(string $printerId = self::DEFAULT_PRINTER_ID): array
+    public function cancelQueue(string $printerId = self::DEFAULT_PRINTER_ID, ?User $actor = null): array
     {
-        $jobs = PrintJob::query()
-            ->where('printer_id', $printerId)
-            ->whereIn('status', [
-                PrintJobStatus::Pending->value,
-                PrintJobStatus::Ready->value,
-                PrintJobStatus::Claimed->value,
-                PrintJobStatus::Printing->value,
-            ])
-            ->orderBy('id')
-            ->get();
+        return DB::transaction(function () use ($printerId, $actor) {
+            $jobs = PrintJob::query()
+                ->where('printer_id', $printerId)
+                ->whereIn('status', [
+                    PrintJobStatus::Pending->value,
+                    PrintJobStatus::Ready->value,
+                    PrintJobStatus::Claimed->value,
+                    PrintJobStatus::Printing->value,
+                ])
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
 
-        foreach ($jobs as $job) {
-            $job->update([
-                'status' => PrintJobStatus::Cancelled,
-                'last_error' => 'Cancelado por administrador',
-                'claimed_by' => null,
-                'claimed_at' => null,
-            ]);
-        }
+            foreach ($jobs as $job) {
+                $job->update([
+                    'status' => PrintJobStatus::Cancelled,
+                    'last_error' => 'Cancelado por administrador',
+                    'claimed_by' => null,
+                    'claimed_at' => null,
+                    'cancelled_by' => $actor?->id,
+                    'cancelled_at' => now(),
+                ]);
+                $this->syncCard($job->fresh() ?? $job);
+            }
 
-        $this->clearPause($printerId);
+            $this->clearPause($printerId);
 
-        return $jobs->map(fn (PrintJob $job) => $job->fresh())->filter()->values()->all();
+            return $jobs->map(fn (PrintJob $job) => $job->fresh())->filter()->values()->all();
+        });
     }
 
     /**
@@ -492,21 +537,18 @@ class PrintJobService
         Cache::forget($this->pauseCacheKey($printerId));
     }
 
-    private function markCredentialPrinted(PrintJob $job): void
+    private function syncCard(PrintJob $job): void
     {
-        if (! $job->academic_year_id) {
+        if (! $job->credential_print_id) {
             return;
         }
 
-        StudentCredentialTracking::query()->updateOrCreate(
-            [
-                'student_id' => $job->student_id,
-                'academic_year_id' => $job->academic_year_id,
-            ],
-            [
-                'credential_printed' => true,
-            ]
-        );
+        app(CredentialPrintService::class)->syncFromJob($job);
+    }
+
+    public function studentForPrint(int $studentId): Student
+    {
+        return $this->loadStudentForPrint($studentId);
     }
 
     private function loadStudentForPrint(int $studentId): Student

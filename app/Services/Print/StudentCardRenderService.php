@@ -14,6 +14,8 @@ use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
 use Illuminate\Support\Facades\Storage;
+use Intervention\Image\Drivers\Gd\Driver;
+use Intervention\Image\ImageManager;
 use RuntimeException;
 
 class StudentCardRenderService
@@ -532,9 +534,8 @@ class StudentCardRenderService
                 CardFonts::resolvePath(CardFonts::DEFAULT_BOLD)
             );
         } else {
-            $bytes = Storage::disk('private')->get($rel);
-            $photo = @imagecreatefromstring($bytes);
-            if ($photo !== false) {
+            $photo = $this->decodeOrientedPhoto($rel);
+            if ($photo !== null) {
                 $this->copyCover($layer, $photo, 0, 0, $w, $h);
                 imagedestroy($photo);
             }
@@ -662,6 +663,32 @@ class StudentCardRenderService
             hexdec(substr($hex, 2, 2)),
             hexdec(substr($hex, 4, 2)),
         ];
+    }
+
+    /**
+     * Decode a stored photo applying EXIF orientation (GD imagecreatefromstring does not).
+     *
+     * @return \GdImage|resource|null
+     */
+    private function decodeOrientedPhoto(string $relative): mixed
+    {
+        $absolute = Storage::disk('private')->path($relative);
+        if (! is_file($absolute)) {
+            return null;
+        }
+
+        try {
+            $encoded = (string) (new ImageManager(new Driver()))->read($absolute)->toJpeg(92);
+        } catch (\Throwable) {
+            $bytes = Storage::disk('private')->get($relative);
+            $fallback = $bytes !== null && $bytes !== '' ? @imagecreatefromstring($bytes) : false;
+
+            return $fallback === false ? null : $fallback;
+        }
+
+        $photo = @imagecreatefromstring($encoded);
+
+        return $photo === false ? null : $photo;
     }
 
     /**

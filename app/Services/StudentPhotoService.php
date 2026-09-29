@@ -4,9 +4,12 @@ namespace App\Services;
 
 use App\Models\Student;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Drivers\Gd\Driver;
 use Intervention\Image\ImageManager;
+use Intervention\Image\Interfaces\ImageInterface;
+use Throwable;
 
 /**
  * Persist student photos under a stable student_id layout.
@@ -27,54 +30,130 @@ class StudentPhotoService
      */
     public function storeStudentPhoto(Student $student, UploadedFile $photo): array
     {
-        $student->loadMissing([
-            'profile:id,profile_picture',
-            'currentEnrollment.classGroup.gradeLevel:id,name',
-            'currentEnrollment.classGroup:id,name,grade_level_id',
-        ]);
+        $fullOriginalPath = null;
 
-        $disk = Storage::disk('private');
-        $currentDir = $this->photoPathService->stableCurrentDirectory($student->id);
-        $manager = new ImageManager(new Driver());
+        try {
+            $student->loadMissing([
+                'profile:id,profile_picture',
+                'currentEnrollment.classGroup.gradeLevel:id,name',
+                'currentEnrollment.classGroup:id,name,grade_level_id',
+            ]);
 
-        $ext = strtolower($photo->getClientOriginalExtension() ?: 'jpg');
-        if (! in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
-            $ext = 'jpg';
+            $disk = Storage::disk('private');
+            $currentDir = $this->photoPathService->stableCurrentDirectory($student->id);
+
+            $ext = strtolower($photo->getClientOriginalExtension() ?: 'jpg');
+            if (! in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                $ext = 'jpg';
+            }
+            if ($ext === 'jpeg') {
+                $ext = 'jpg';
+            }
+
+            $this->archiveCurrentIfPresent($student->id);
+            $this->deleteLegacyFilesIfAny($student);
+
+            $disk->makeDirectory($currentDir);
+
+            $originalName = "original.{$ext}";
+            $fullOriginalPath = "{$currentDir}/{$originalName}";
+            $disk->putFileAs($currentDir, $photo, $originalName);
+
+            $this->normalizeOriginalIfNeeded($student->id, $fullOriginalPath, $ext);
+            $this->writeVariantsForOriginal($fullOriginalPath);
+
+            $dbValue = $this->photoPathService->stableProfilePictureValue($student->id);
+            $student->profile?->update(['profile_picture' => $dbValue]);
+
+            return [
+                'filename' => $dbValue,
+                'path_original' => $fullOriginalPath,
+                'path_profile' => "{$currentDir}/profile.jpg",
+                'path_thumb' => "{$currentDir}/thumb.jpg",
+            ];
+        } catch (Throwable $e) {
+            Log::error('[toma-foto] No se pudo guardar o convertir la foto', [
+                'student_id' => $student->id,
+                'path' => $fullOriginalPath,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
         }
+    }
+
+    /**
+     * Rewrite original pixels upright when EXIF orientation is not 1.
+     */
+    public function normalizeOriginalIfNeeded(int $studentId, string $relativePath, ?string $ext = null): bool
+    {
+        $disk = Storage::disk('private');
+        if (! $disk->exists($relativePath)) {
+            return false;
+        }
+
+        $absolute = $disk->path($relativePath);
+        $orientation = $this->readExifOrientation($absolute);
+        if ($orientation <= 1) {
+            return false;
+        }
+
+        $ext = strtolower($ext ?: pathinfo($relativePath, PATHINFO_EXTENSION) ?: 'jpg');
         if ($ext === 'jpeg') {
             $ext = 'jpg';
         }
 
-        // Archive previous current/ before replacing.
-        $this->archiveCurrentIfPresent($student->id);
+        $manager = new ImageManager(new Driver(), autoOrientation: true, strip: true);
+        $image = $manager->read($absolute);
+        $disk->put($relativePath, (string) $this->encodeWithoutExif($image, $ext));
 
-        // Also clean legacy grade/group files when upgrading from old layout.
-        $this->deleteLegacyFilesIfAny($student);
+        return true;
+    }
 
-        $disk->makeDirectory($currentDir);
+    public function writeVariantsForOriginal(string $originalRelative): void
+    {
+        $disk = Storage::disk('private');
+        $absolute = $disk->path($originalRelative);
+        $dir = str_replace('\\', '/', dirname($originalRelative));
+        $base = basename($originalRelative);
+        $stable = (bool) preg_match('#/current$#', $dir);
+        $thumbRel = $stable ? "{$dir}/thumb.jpg" : "{$dir}/thumb_{$base}";
+        $profileRel = $stable ? "{$dir}/profile.jpg" : "{$dir}/profile_{$base}";
 
-        $originalName = "original.{$ext}";
-        $fullOriginalPath = "{$currentDir}/{$originalName}";
-        $disk->putFileAs($currentDir, $photo, $originalName);
-        $sourcePath = $disk->path($fullOriginalPath);
+        $manager = new ImageManager(new Driver());
+        $thumb = $manager->read($absolute)->cover(40, 40)->toJpeg(75);
+        $disk->put($thumbRel, (string) $thumb);
 
-        $image = $manager->read($sourcePath);
-        $thumb = $image->cover(40, 40)->toJpeg(75);
-        $disk->put("{$currentDir}/thumb.jpg", (string) $thumb);
+        $profile = $manager->read($absolute)->scale(width: 400)->toJpeg(80);
+        $disk->put($profileRel, (string) $profile);
+    }
 
-        $image = $manager->read($sourcePath);
-        $profile = $image->scale(width: 400)->toJpeg(80);
-        $disk->put("{$currentDir}/profile.jpg", (string) $profile);
+    public function readExifOrientation(string $absolutePath): int
+    {
+        if (function_exists('exif_read_data')) {
+            $exif = @exif_read_data($absolutePath);
+            if (is_array($exif)) {
+                $value = $exif['Orientation'] ?? ($exif['IFD0']['Orientation'] ?? null);
+                if ($value !== null) {
+                    return max(1, (int) $value);
+                }
+            }
+        }
 
-        $dbValue = $this->photoPathService->stableProfilePictureValue($student->id);
-        $student->profile?->update(['profile_picture' => $dbValue]);
+        $manager = new ImageManager(new Driver(), autoOrientation: false);
+        $image = $manager->read($absolutePath);
+        $value = $image->exif('IFD0.Orientation') ?? $image->exif('Orientation');
 
-        return [
-            'filename' => $dbValue,
-            'path_original' => $fullOriginalPath,
-            'path_profile' => "{$currentDir}/profile.jpg",
-            'path_thumb' => "{$currentDir}/thumb.jpg",
-        ];
+        return max(1, (int) ($value ?? 1));
+    }
+
+    private function encodeWithoutExif(ImageInterface $image, string $ext): string
+    {
+        return (string) match ($ext) {
+            'png' => $image->toPng(),
+            'webp' => $image->toWebp(90),
+            default => $image->toJpeg(92),
+        };
     }
 
     private function archiveCurrentIfPresent(int $studentId): void

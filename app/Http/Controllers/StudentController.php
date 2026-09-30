@@ -9,7 +9,9 @@ use App\Models\Student;
 use App\Services\StudentPhotoPathService;
 use App\Services\StudentPhotoService;
 use App\Services\StudentsService;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -99,13 +101,55 @@ class StudentController extends Controller
 
     /**
      * Upload and optimize student photo.
+     *
+     * Optional upload_id replays the same selection for 30 minutes so a double
+     * click or a retry after a dropped response does not archive current/ again.
      */
     public function uploadPhoto(Request $request, int $studentId): JsonResponse
     {
-        $request->validate([
+        $validated = $request->validate([
             'photo' => ['required', 'file', 'image', 'max:8192'],
+            'upload_id' => ['nullable', 'uuid'],
         ]);
 
+        $uploadId = $validated['upload_id'] ?? null;
+        if (! is_string($uploadId)) {
+            return response()->json($this->storeUploadedPhoto($request, $studentId));
+        }
+
+        $cacheKey = "student-photo-upload:{$studentId}:{$uploadId}";
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached)) {
+            return response()->json($cached);
+        }
+
+        try {
+            $body = Cache::lock("student-photo:{$studentId}", 60)->block(15, function () use ($request, $studentId, $cacheKey): array {
+                $cached = Cache::get($cacheKey);
+                if (is_array($cached)) {
+                    return $cached;
+                }
+
+                $body = $this->storeUploadedPhoto($request, $studentId);
+                Cache::put($cacheKey, $body, now()->addMinutes(30));
+
+                return $body;
+            });
+        } catch (LockTimeoutException) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La foto se está guardando. Espera un momento e inténtalo de nuevo.',
+            ], 409);
+        }
+
+        return response()->json($body);
+    }
+
+    /**
+     * @return array{success:bool, message:string, data:array<string, mixed>}
+     */
+    private function storeUploadedPhoto(Request $request, int $studentId): array
+    {
         $student = Student::with(['profile'])->findOrFail($studentId);
 
         $result = $this->studentPhotoService->storeStudentPhoto($student, $request->file('photo'));
@@ -117,13 +161,13 @@ class StudentController extends Controller
         ]);
         $photoUrl = app(StudentPhotoPathService::class)->signedUrl($student, 'profile');
 
-        return response()->json([
+        return [
             'success' => true,
             'message' => 'Foto guardada y optimizada correctamente.',
             'data' => [
                 ...$result,
                 'photo_url' => $photoUrl,
             ],
-        ]);
+        ];
     }
 }

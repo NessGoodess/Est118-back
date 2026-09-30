@@ -6,6 +6,7 @@ use App\Enums\CredentialPrintReason;
 use App\Enums\CredentialSideStatus;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\PrintJobStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -106,6 +107,39 @@ class CredentialPrint extends Model
         return $this->front_status === CredentialSideStatus::Printed
             && $this->back_status === CredentialSideStatus::Pending
             && $this->discarded_at === null;
+    }
+
+    /** Tarjetas sin terminar y no descartadas: bloquean un envío nuevo del mismo alumno. */
+    public function scopeOpen(Builder $query): Builder
+    {
+        return $query
+            ->whereNull('discarded_at')
+            ->where(function (Builder $q) {
+                $q->where('front_status', CredentialSideStatus::Pending)
+                    ->orWhere(function (Builder $inner) {
+                        $inner->where('front_status', CredentialSideStatus::Printed)
+                            ->where('back_status', CredentialSideStatus::Pending);
+                    });
+            });
+    }
+
+    /**
+     * Por qué la tarjeta bloquea un envío nuevo, o null si no lo bloquea.
+     * in_queue | needs_back | front_pending
+     */
+    public function openReason(): ?string
+    {
+        if ($this->discarded_at !== null) {
+            return null;
+        }
+        if ($this->needsFront()) {
+            return $this->activeJob() ? 'in_queue' : 'front_pending';
+        }
+        if ($this->needsBack()) {
+            return $this->activeJob() ? 'in_queue' : 'needs_back';
+        }
+
+        return null;
     }
 
     public function activeJob(): ?PrintJob

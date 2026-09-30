@@ -72,7 +72,7 @@ class PrintJobService
             'academic_year_id' => $card->academic_year_id ?? $enrollment?->academic_year_id,
         ]);
 
-        RenderStudentCardJob::dispatchSync($job->id);
+        RenderStudentCardJob::dispatch($job->id)->afterCommit();
 
         return $job->fresh() ?? $job;
     }

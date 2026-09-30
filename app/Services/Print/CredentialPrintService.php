@@ -10,6 +10,7 @@ use App\Models\CredentialPrint;
 use App\Models\PrintJob;
 use App\Models\StudentCredentialTracking;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -23,7 +24,7 @@ class CredentialPrintService
 
     /**
      * @param  array<int, int>  $studentIds
-     * @return array{batch_uuid: string, strategy: PrintBatchStrategy, cards: Collection<int, CredentialPrint>}
+     * @return array{batch_uuid: ?string, strategy: PrintBatchStrategy, cards: Collection<int, CredentialPrint>, skipped: array<int, array<string, mixed>>}
      */
     public function createBatch(
         array $studentIds,
@@ -42,9 +43,25 @@ class CredentialPrintService
         $batchUuid = (string) Str::uuid();
 
         return DB::transaction(function () use ($studentIds, $user, $templateKey, $strategy, $printerId, $batchUuid) {
+            $openCards = CredentialPrint::query()
+                ->open()
+                ->whereIn('student_id', $studentIds)
+                ->with(['printJobs', 'student.profile:id,first_name,last_name'])
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('student_id');
+
+            $skipped = [];
             $cards = collect();
 
             foreach ($studentIds as $studentId) {
+                $open = $openCards->get($studentId);
+                if ($open) {
+                    $skipped[] = $this->skippedPayload($open);
+
+                    continue;
+                }
+
                 $student = $this->printJobs->studentForPrint($studentId);
                 $design = $this->printJobs->resolveDesignForStudent($student, $templateKey);
                 $facesMode = ($design->faces_mode ?? 'single') === 'double' ? 'double' : 'single';
@@ -57,42 +74,89 @@ class CredentialPrintService
                     ?? $student->enrollments()->where('status', 'active')->first()?->academic_year_id;
 
                 $frontPrinted = $strategy === PrintBatchStrategy::BackOnly;
-                $card = CredentialPrint::query()->create([
-                    'student_id' => $student->id,
-                    'academic_year_id' => $yearId,
-                    'card_design_id' => $design->id,
-                    'faces_mode' => $facesMode,
-                    'front_status' => $frontPrinted
-                        ? CredentialSideStatus::Printed
-                        : CredentialSideStatus::Pending,
-                    'back_status' => $facesMode === 'double'
-                        ? CredentialSideStatus::Pending
-                        : CredentialSideStatus::NotApplicable,
-                    'strategy' => $strategy,
-                    'batch_uuid' => $batchUuid,
-                    'reason' => $this->resolveReason((int) $student->id, $yearId ? (int) $yearId : null),
-                    'created_by' => $user->id,
-                    'front_printed_at' => $frontPrinted ? now() : null,
-                ]);
+                try {
+                    $card = CredentialPrint::query()->create([
+                        'student_id' => $student->id,
+                        'academic_year_id' => $yearId,
+                        'card_design_id' => $design->id,
+                        'faces_mode' => $facesMode,
+                        'front_status' => $frontPrinted
+                            ? CredentialSideStatus::Printed
+                            : CredentialSideStatus::Pending,
+                        'back_status' => $facesMode === 'double'
+                            ? CredentialSideStatus::Pending
+                            : CredentialSideStatus::NotApplicable,
+                        'strategy' => $strategy,
+                        'batch_uuid' => $batchUuid,
+                        'reason' => $this->resolveReason((int) $student->id, $yearId ? (int) $yearId : null),
+                        'created_by' => $user->id,
+                        'front_printed_at' => $frontPrinted ? now() : null,
+                    ]);
+                } catch (QueryException $e) {
+                    if (! $this->isDuplicateOpenCard($e)) {
+                        throw $e;
+                    }
+                    $skipped[] = [
+                        'student_id' => (int) $student->id,
+                        'student_name' => trim(($student->profile?->first_name ?? '').' '.($student->profile?->last_name ?? '')),
+                        'reason' => 'in_queue',
+                        'credential_print_id' => null,
+                        'batch_uuid' => null,
+                        'created_at' => null,
+                    ];
+
+                    continue;
+                }
                 $cards->push($card);
             }
 
-            if ($strategy === PrintBatchStrategy::BackOnly) {
-                $this->enqueue($cards->pluck('id')->all(), 'back', $user, $printerId);
-            } elseif ($strategy === PrintBatchStrategy::PerCard) {
-                $this->enqueue([$cards->first()->id], 'front', $user, $printerId);
-            } else {
-                $this->enqueue($cards->pluck('id')->all(), 'front', $user, $printerId);
+            if ($cards->isNotEmpty()) {
+                if ($strategy === PrintBatchStrategy::BackOnly) {
+                    $this->enqueue($cards->pluck('id')->all(), 'back', $user, $printerId);
+                } elseif ($strategy === PrintBatchStrategy::PerCard) {
+                    $this->enqueue([$cards->first()->id], 'front', $user, $printerId);
+                } else {
+                    $this->enqueue($cards->pluck('id')->all(), 'front', $user, $printerId);
+                }
             }
 
             return [
-                'batch_uuid' => $batchUuid,
+                'batch_uuid' => $cards->isNotEmpty() ? $batchUuid : null,
                 'strategy' => $strategy,
-                'cards' => $this->cardsWithRelations(
-                    CredentialPrint::query()->where('batch_uuid', $batchUuid)->orderBy('id')->get()
-                ),
+                'cards' => $cards->isNotEmpty()
+                    ? $this->cardsWithRelations(
+                        CredentialPrint::query()->where('batch_uuid', $batchUuid)->orderBy('id')->get()
+                    )
+                    : collect(),
+                'skipped' => $skipped,
             ];
         });
+    }
+
+    /**
+     * @return array{student_id: int, student_name: string, reason: string, credential_print_id: int, batch_uuid: string, created_at: ?string}
+     */
+    private function skippedPayload(CredentialPrint $open): array
+    {
+        $profile = $open->student?->profile;
+
+        return [
+            'student_id' => (int) $open->student_id,
+            'student_name' => $profile
+                ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
+                : '',
+            'reason' => $open->openReason() ?? 'in_queue',
+            'credential_print_id' => (int) $open->id,
+            'batch_uuid' => (string) $open->batch_uuid,
+            'created_at' => $open->created_at?->toIso8601String(),
+        ];
+    }
+
+    private function isDuplicateOpenCard(QueryException $e): bool
+    {
+        $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+
+        return $sqlState === '23000';
     }
 
     /**
@@ -145,7 +209,7 @@ class CredentialPrintService
      * @return Collection<int, CredentialPrint>
      */
     public function discard(
-        User $user,
+        ?User $user,
         ?array $cardIds = null,
         ?string $batchUuid = null,
         string $reason = 'Descartado por el operador'
@@ -177,7 +241,7 @@ class CredentialPrintService
                 $card->update([
                     'front_status' => $front,
                     'back_status' => $back,
-                    'discarded_by' => $user->id,
+                    'discarded_by' => $user?->id,
                     'discarded_at' => now(),
                     'discard_reason' => $reason,
                 ]);

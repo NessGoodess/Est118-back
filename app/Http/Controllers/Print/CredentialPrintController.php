@@ -40,7 +40,7 @@ class CredentialPrintController extends Controller
         return response()->json([
             'success' => true,
             'data' => $this->serializeBatch($batch),
-        ], 201);
+        ], $batch['cards']->isEmpty() ? 200 : 202);
     }
 
     public function batch(string $batchUuid): JsonResponse
@@ -174,11 +174,46 @@ class CredentialPrintController extends Controller
             $strategy = $strategy->value;
         }
 
+        $cards = $batch['cards']->map(fn (CredentialPrint $card) => $this->serializeCard($card))->values();
+
         return [
             'batch_uuid' => $batch['batch_uuid'],
             'strategy' => (string) $strategy,
-            'cards' => $batch['cards']->map(fn (CredentialPrint $card) => $this->serializeCard($card))->values(),
+            'cards' => $cards,
+            'skipped' => array_values($batch['skipped'] ?? []),
+            'summary' => $this->batchSummary($cards),
         ];
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $cards
+     * @return array{total: int, rendering: int, ready: int, failed: int}
+     */
+    private function batchSummary($cards): array
+    {
+        $summary = [
+            'total' => $cards->count(),
+            'rendering' => 0,
+            'ready' => 0,
+            'failed' => 0,
+        ];
+
+        foreach ($cards as $card) {
+            $job = $card['active_job'] ?? null;
+            if (! $job && ! empty($card['jobs'])) {
+                $job = $card['jobs'][array_key_last($card['jobs'])];
+            }
+            $status = is_array($job) ? ($job['status'] ?? null) : null;
+            if ($status === PrintJobStatus::Pending->value) {
+                $summary['rendering']++;
+            } elseif ($status === PrintJobStatus::Ready->value) {
+                $summary['ready']++;
+            } elseif ($status === PrintJobStatus::Failed->value) {
+                $summary['failed']++;
+            }
+        }
+
+        return $summary;
     }
 
     /**

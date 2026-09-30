@@ -22,8 +22,11 @@ use App\Models\User;
 use App\Services\Print\CredentialPrintBackfill;
 use App\Services\Print\CredentialPrintService;
 use App\Services\Print\PrintJobService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -253,9 +256,12 @@ class CredentialPrintFlowTest extends TestCase
             'template_key' => $this->design->uuid,
             'strategy' => 'fronts_then_backs',
         ]);
-        $create->assertCreated();
+        $create->assertAccepted();
         $batchUuid = $create->json('data.batch_uuid');
         $this->assertNotEmpty($batchUuid);
+        $create->assertJsonPath('data.summary.total', 1);
+        $create->assertJsonPath('data.summary.rendering', 1);
+        $create->assertJsonPath('data.summary.ready', 0);
 
         Queue::assertPushed(RenderStudentCardJob::class);
 
@@ -272,6 +278,125 @@ class CredentialPrintFlowTest extends TestCase
             'credential_print_ids' => [$cardId],
             'side' => 'back',
         ])->assertOk()->assertJsonPath('data.0.side_mode', 'back');
+    }
+
+    public function test_resending_a_student_with_an_open_card_is_skipped(): void
+    {
+        $ana = $this->makeStudent('ANA140111MOCRRNC1', 'Ana', 'Dup');
+        $this->enroll($ana);
+        $service = app(CredentialPrintService::class);
+
+        $first = $service->createBatch([$ana->id], $this->user, $this->design->uuid);
+        $this->assertCount(1, $first['cards']);
+        $this->assertSame([], $first['skipped']);
+
+        $second = $service->createBatch([$ana->id], $this->user, $this->design->uuid);
+        $this->assertNull($second['batch_uuid']);
+        $this->assertTrue($second['cards']->isEmpty());
+        $this->assertSame('in_queue', $second['skipped'][0]['reason']);
+        $this->assertSame($ana->id, $second['skipped'][0]['student_id']);
+        $this->assertSame('Ana Dup', $second['skipped'][0]['student_name']);
+        $this->assertSame(1, CredentialPrint::query()->where('student_id', $ana->id)->count());
+    }
+
+    public function test_mixed_batch_skips_only_the_student_with_an_open_card(): void
+    {
+        $ana = $this->makeStudent('ANA140112MOCRRNC2', 'Ana', 'Open');
+        $luis = $this->makeStudent('LUI140112HOCRRNC3', 'Luis', 'New');
+        $sara = $this->makeStudent('SAR140112MOCRRNC4', 'Sara', 'New');
+        $this->enroll($ana);
+        $this->enroll($luis);
+        $this->enroll($sara);
+
+        $service = app(CredentialPrintService::class);
+        $jobs = app(PrintJobService::class);
+        $service->createBatch([$ana->id], $this->user, $this->design->uuid);
+        $jobs->markCompleted(PrintJob::query()->where('student_id', $ana->id)->first());
+
+        $batch = $service->createBatch(
+            [$ana->id, $luis->id, $sara->id],
+            $this->user,
+            $this->design->uuid
+        );
+
+        $this->assertCount(2, $batch['cards']);
+        $this->assertCount(1, $batch['skipped']);
+        $this->assertSame($ana->id, $batch['skipped'][0]['student_id']);
+        $this->assertSame('needs_back', $batch['skipped'][0]['reason']);
+        $this->assertSame(2, PrintJob::query()->where('side_mode', 'front')->where('status', '!=', PrintJobStatus::Completed)->count());
+    }
+
+    public function test_finished_or_discarded_card_does_not_block_a_new_batch(): void
+    {
+        $ana = $this->makeStudent('ANA140113MOCRRNC5', 'Ana', 'Done');
+        $luis = $this->makeStudent('LUI140113HOCRRNC6', 'Luis', 'Tossed');
+        $this->enroll($ana);
+        $this->enroll($luis);
+        $service = app(CredentialPrintService::class);
+        $jobs = app(PrintJobService::class);
+
+        $service->createBatch([$ana->id], $this->user, $this->design->uuid);
+        $jobs->markCompleted(PrintJob::query()->where('student_id', $ana->id)->first());
+        $service->markSide(CredentialPrint::query()->where('student_id', $ana->id)->first()->id, 'back', $this->user);
+
+        $luisBatch = $service->createBatch([$luis->id], $this->user, $this->design->uuid);
+        $service->discard($this->user, null, $luisBatch['batch_uuid'], 'Prueba');
+
+        $again = $service->createBatch([$ana->id, $luis->id], $this->user, $this->design->uuid);
+        $this->assertCount(2, $again['cards']);
+        $this->assertSame([], $again['skipped']);
+    }
+
+    public function test_unique_index_rejects_a_second_open_card_for_the_same_student(): void
+    {
+        $ana = $this->makeStudent('ANA140114MOCRRNC7', 'Ana', 'Index');
+        $this->enroll($ana);
+        $service = app(CredentialPrintService::class);
+        $service->createBatch([$ana->id], $this->user, $this->design->uuid);
+
+        $existing = CredentialPrint::query()->where('student_id', $ana->id)->first();
+        $this->expectException(QueryException::class);
+        CredentialPrint::query()->create($existing->only([
+            'student_id', 'academic_year_id', 'card_design_id', 'faces_mode',
+            'front_status', 'back_status', 'strategy', 'reason',
+        ]) + ['batch_uuid' => (string) \Illuminate\Support\Str::uuid(), 'created_by' => $this->user->id]);
+    }
+
+    public function test_dedupe_command_keeps_one_open_card_per_student(): void
+    {
+        $ana = $this->makeStudent('ANA140115MOCRRNC8', 'Ana', 'Dedupe');
+        $this->enroll($ana);
+        $service = app(CredentialPrintService::class);
+        $jobs = app(PrintJobService::class);
+
+        $batch = $service->createBatch([$ana->id], $this->user, $this->design->uuid);
+        $jobs->markCompleted(PrintJob::query()->where('student_id', $ana->id)->first());
+        $kept = CredentialPrint::query()->where('student_id', $ana->id)->first();
+
+        // El índice único existe para impedir esto; se quita solo para simular
+        // duplicados que quedaron antes de la migración.
+        Schema::table('credential_prints', function ($table) {
+            $table->dropUnique(['open_student_id']);
+        });
+        $duplicate = CredentialPrint::query()->create($kept->only([
+            'student_id', 'academic_year_id', 'card_design_id', 'faces_mode',
+            'strategy', 'reason', 'created_by',
+        ]) + [
+            'batch_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'front_status' => CredentialSideStatus::Pending,
+            'back_status' => CredentialSideStatus::Pending,
+        ]);
+
+        $this->assertSame(2, CredentialPrint::query()->open()->where('student_id', $ana->id)->count());
+
+        Artisan::call('credential-prints:dedupe-open', ['--dry-run' => true]);
+        $this->assertSame(2, CredentialPrint::query()->open()->where('student_id', $ana->id)->count());
+
+        Artisan::call('credential-prints:dedupe-open');
+        $open = CredentialPrint::query()->open()->where('student_id', $ana->id)->get();
+        $this->assertCount(1, $open);
+        $this->assertSame($kept->id, $open->first()->id);
+        $this->assertNotNull($duplicate->fresh()->discarded_at);
     }
 
     public function test_backfill_links_back_job_to_matching_front(): void

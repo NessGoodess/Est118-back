@@ -12,12 +12,26 @@ use App\Models\Profile;
 use App\Models\Student;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use RuntimeException;
 use Throwable;
 
 class SyncDirectoryDetailsService
 {
+    public const NOT_SPECIFIED = 'NO_ESPECIFICADO';
+
+    private const ADDRESS_FIELDS = [
+        'street_type' => 'vialidad',
+        'street_name' => 'calle',
+        'house_number' => 'número',
+        'unit_number' => 'interior',
+        'neighborhood_type' => 'asentamiento',
+        'neighborhood_name' => 'colonia',
+        'city' => 'municipio',
+    ];
+
     /**
      * @return array<string, mixed>
      */
@@ -40,38 +54,35 @@ class SyncDirectoryDetailsService
             throw new RuntimeException('No existe el grado '.$gradeName.' en el catálogo.');
         }
 
-        $rows = $this->readRows($path);
+        [$sheetName, $rows] = $this->readRows($path);
         $enrollments = $this->periodEnrollments($year->id, $grade->id);
         $matches = $this->matchRows($rows, $enrollments);
 
+        $curpChanges = [];
         $phoneChanges = [];
         $emailChanges = [];
         $tutorsAdded = [];
-        $addressFills = [];
+        $addressChanges = [];
         $skipped = [];
         $errors = [];
         $applied = 0;
 
         foreach ($matches as $match) {
             if ($match['enrollment'] === null) {
-                $skipped[] = $this->issue($match, $match['reason'] !== '' ? $match['reason'] : 'No está inscrito en 2026-2027.');
+                $skipped[] = $this->issue($match, $match['reason']);
 
                 continue;
             }
 
             try {
-                $changes = $this->planChanges($match['enrollment']->student, $match['row']);
-                foreach ($changes['phones'] as $change) {
-                    $phoneChanges[] = $change;
-                }
-                foreach ($changes['emails'] as $change) {
-                    $emailChanges[] = $change;
-                }
-                foreach ($changes['tutors'] as $change) {
-                    $tutorsAdded[] = $change;
-                }
-                foreach ($changes['addresses'] as $change) {
-                    $addressFills[] = $change;
+                $changes = $this->planChanges($match['enrollment']->student, $match['row'], $match['method']);
+                array_push($curpChanges, ...$changes['curps']);
+                array_push($phoneChanges, ...$changes['phones']);
+                array_push($emailChanges, ...$changes['emails']);
+                array_push($tutorsAdded, ...$changes['tutors']);
+                array_push($addressChanges, ...$changes['addresses']);
+                foreach ($changes['problems'] as $problem) {
+                    $skipped[] = $this->issue($match, $problem);
                 }
 
                 if ($dryRun || $changes['writes'] === []) {
@@ -89,25 +100,45 @@ class SyncDirectoryDetailsService
             }
         }
 
+        $matchedIds = [];
+        foreach ($matches as $match) {
+            if ($match['enrollment']) {
+                $matchedIds[$match['enrollment']->id] = true;
+            }
+        }
+        $notOnList = $enrollments
+            ->reject(fn (Enrollment $enrollment) => isset($matchedIds[$enrollment->id]))
+            ->map(fn (Enrollment $enrollment) => [
+                'curp' => strtoupper(trim((string) $enrollment->student->profile->national_id)),
+                'name' => $this->profileName($enrollment->student->profile),
+                'group' => (string) ($enrollment->classGroup?->name ?? ''),
+            ])
+            ->sortBy(fn (array $row) => $row['group'].' '.$row['name'])
+            ->values()
+            ->all();
+
         return [
             'dry_run' => $dryRun,
             'academic_year_id' => $year->id,
             'academic_year_label' => trim($year->year_start.'-'.$year->year_end),
             'grade' => $gradeName,
+            'sheet' => $sheetName,
             'rows' => count($rows),
-            'matched' => count(array_filter($matches, fn (array $match) => $match['enrollment'] !== null)),
+            'matched' => count($matchedIds),
             'applied' => $dryRun ? 0 : $applied,
+            'curp_changes' => $curpChanges,
             'phone_changes' => $phoneChanges,
             'email_changes' => $emailChanges,
             'tutors_added' => $tutorsAdded,
-            'address_fills' => $addressFills,
+            'address_changes' => $addressChanges,
+            'not_on_list' => $notOnList,
             'skipped' => $skipped,
             'errors' => $errors,
         ];
     }
 
     /**
-     * @return Collection<string, Enrollment>
+     * @return Collection<int, Enrollment>
      */
     private function periodEnrollments(int $yearId, int $gradeId): Collection
     {
@@ -118,171 +149,340 @@ class SyncDirectoryDetailsService
             ->with(['student.profile.address', 'student.guardians.profile', 'classGroup'])
             ->get()
             ->filter(fn (Enrollment $enrollment) => $enrollment->student?->profile)
-            ->keyBy(fn (Enrollment $enrollment) => strtoupper(trim((string) $enrollment->student->profile->national_id)));
+            ->values();
     }
 
     /**
      * @param  list<array<string, string>>  $rows
-     * @param  Collection<string, Enrollment>  $enrollments
-     * @return list<array{row: array<string, string>, enrollment: ?Enrollment, reason: string}>
+     * @param  Collection<int, Enrollment>  $enrollments
+     * @return list<array{row: array<string, string>, enrollment: ?Enrollment, method: string, reason: string}>
      */
     private function matchRows(array $rows, Collection $enrollments): array
     {
-        $used = [];
-        $matches = [];
-        $pendingNear = [];
-
-        foreach ($rows as $row) {
-            if ($row['curp'] === '') {
-                $matches[] = ['row' => $row, 'enrollment' => null, 'reason' => 'La fila no trae CURP.'];
-
-                continue;
-            }
-
-            $found = $enrollments->get($row['curp']);
-            if ($found && ! isset($used[$found->id])) {
-                $used[$found->id] = true;
-                $matches[] = ['row' => $row, 'enrollment' => $found, 'reason' => ''];
-
-                continue;
-            }
-
-            $pendingNear[] = $row;
+        $byCurp = [];
+        foreach ($enrollments as $enrollment) {
+            $byCurp[strtoupper(trim((string) $enrollment->student->profile->national_id))][] = $enrollment;
         }
 
-        foreach ($pendingNear as $row) {
+        $used = [];
+        $results = [];
+        $pending = [];
+
+        foreach ($rows as $index => $row) {
+            $found = array_values(array_filter(
+                $byCurp[$row['curp']] ?? [],
+                fn (Enrollment $enrollment) => ! isset($used[$enrollment->id])
+            ));
+            if ($row['curp'] !== '' && count($found) === 1) {
+                $used[$found[0]->id] = true;
+                $results[$index] = ['row' => $row, 'enrollment' => $found[0], 'method' => 'exact', 'reason' => ''];
+
+                continue;
+            }
+            $pending[$index] = $row;
+        }
+
+        foreach ($pending as $index => $row) {
+            $candidates = [];
+            if ($row['curp'] !== '') {
+                foreach ($enrollments as $enrollment) {
+                    if (isset($used[$enrollment->id])) {
+                        continue;
+                    }
+                    $curp = strtoupper(trim((string) $enrollment->student->profile->national_id));
+                    if (abs(strlen($curp) - strlen($row['curp'])) > 2 || levenshtein($curp, $row['curp']) > 2) {
+                        continue;
+                    }
+                    if (! $this->namesMatch($row['student_name'], $this->profileName($enrollment->student->profile))) {
+                        continue;
+                    }
+                    $candidates[] = $enrollment;
+                }
+            }
+            if (count($candidates) === 1) {
+                $used[$candidates[0]->id] = true;
+                $results[$index] = ['row' => $row, 'enrollment' => $candidates[0], 'method' => 'near', 'reason' => ''];
+                unset($pending[$index]);
+            }
+        }
+
+        foreach ($pending as $index => $row) {
             $candidates = [];
             foreach ($enrollments as $enrollment) {
                 if (isset($used[$enrollment->id])) {
                     continue;
                 }
-                $curp = strtoupper(trim((string) $enrollment->student->profile->national_id));
-                if (abs(strlen($curp) - strlen($row['curp'])) > 1 || levenshtein($curp, $row['curp']) !== 1) {
-                    continue;
+                if ($this->sameName($row['student_name'], $this->profileName($enrollment->student->profile))) {
+                    $candidates[] = $enrollment;
                 }
-                if ($this->normalizeName($this->excelStudentName($row)) !== $this->normalizeName($this->profileName($enrollment->student->profile))) {
-                    continue;
-                }
-                $candidates[] = $enrollment;
             }
 
             if (count($candidates) === 1) {
                 $used[$candidates[0]->id] = true;
-                $matches[] = ['row' => $row, 'enrollment' => $candidates[0], 'reason' => ''];
+                $results[$index] = ['row' => $row, 'enrollment' => $candidates[0], 'method' => 'name', 'reason' => ''];
 
                 continue;
             }
 
-            $matches[] = [
+            $results[$index] = [
                 'row' => $row,
                 'enrollment' => null,
+                'method' => '',
                 'reason' => count($candidates) > 1
-                    ? 'La CURP parecida coincide con más de un alumno de 2026-2027.'
-                    : 'No está inscrito en 2026-2027.',
+                    ? 'El nombre coincide con más de un alumno de 2026-2027.'
+                    : 'No se encontró en 2026-2027 ni por CURP ni por nombre.',
             ];
         }
 
-        return $matches;
+        ksort($results);
+
+        return array_values($results);
     }
 
     /**
      * @param  array<string, string>  $row
      * @return array{
+     *   curps: list<array<string, string>>,
      *   phones: list<array<string, string>>,
      *   emails: list<array<string, string>>,
      *   tutors: list<array<string, string>>,
      *   addresses: list<array<string, string>>,
+     *   problems: list<string>,
      *   writes: list<callable>
      * }
      */
-    private function planChanges(Student $student, array $row): array
+    private function planChanges(Student $student, array $row, string $method): array
     {
         $student->loadMissing('profile.address', 'guardians.profile');
         $profile = $student->profile;
-        $phones = [];
-        $emails = [];
-        $tutors = [];
-        $addresses = [];
-        $writes = [];
+        $studentName = $this->profileName($profile);
+        $plan = [
+            'curps' => [],
+            'phones' => [],
+            'emails' => [],
+            'tutors' => [],
+            'addresses' => [],
+            'problems' => [],
+            'writes' => [],
+        ];
+
+        $this->planCurp($profile, $row, $method, $studentName, $plan);
 
         $phone = $this->digits($row['phone']);
         $email = $this->validEmail($row['email']);
-        $studentName = $this->profileName($profile);
-
-        if ($phone !== null && $this->digits((string) $profile->phone_number) !== $phone) {
-            $phones[] = $this->contactChange($studentName, 'alumno', (string) $profile->phone_number, $phone);
-            $writes[] = function () use ($profile, $phone) {
-                $profile->phone_number = $phone;
-                $profile->save();
-            };
+        if ($row['phone'] !== '' && $phone === null) {
+            $plan['problems'][] = 'Teléfono del Excel inválido ('.$row['phone'].'); no se cambió.';
         }
 
         $matched = $this->matchingGuardian($student, $row);
         if ($matched) {
             $guardianProfile = $matched->profile;
+            $who = 'tutor '.$this->profileName($guardianProfile);
             if ($phone !== null && $this->digits((string) $guardianProfile->phone_number) !== $phone) {
-                $phones[] = $this->contactChange($studentName, 'tutor '.$this->profileName($guardianProfile), (string) $guardianProfile->phone_number, $phone);
-                $writes[] = function () use ($guardianProfile, $phone) {
+                $plan['phones'][] = $this->change($studentName, $who, (string) $guardianProfile->phone_number, $phone);
+                $plan['writes'][] = function () use ($guardianProfile, $phone) {
                     $guardianProfile->phone_number = $phone;
                     $guardianProfile->save();
                 };
             }
             if ($email !== null && strcasecmp((string) $guardianProfile->email, $email) !== 0) {
-                $emails[] = $this->contactChange($studentName, 'tutor '.$this->profileName($guardianProfile), (string) $guardianProfile->email, $email);
-                $writes[] = function () use ($guardianProfile, $email) {
+                $plan['emails'][] = $this->change($studentName, $who, (string) $guardianProfile->email, $email);
+                $plan['writes'][] = function () use ($guardianProfile, $email) {
                     $guardianProfile->email = $email;
                     $guardianProfile->save();
                 };
             }
-            if ($this->isBlank((string) $matched->Kinship) && $row['kinship'] !== '') {
-                $writes[] = function () use ($matched, $row, $student) {
+            if ($row['kinship'] !== '' && $this->isBlank((string) $matched->Kinship)) {
+                $plan['writes'][] = function () use ($matched, $row, $student) {
                     $matched->update(['Kinship' => $row['kinship']]);
                     $student->guardians()->updateExistingPivot($matched->id, [
                         'relationship' => $row['kinship'],
                     ]);
                 };
             }
-        } elseif ($this->hasTutorIdentity($row) || $phone !== null || $email !== null) {
-            $tutorName = $this->excelTutorName($row);
-            $tutors[] = [
+        } elseif ($this->excelTutorName($row) !== '' || $this->usableTutorCurp($row['g_curp'], '') !== null) {
+            $tutorName = $this->excelTutorName($row) !== '' ? $this->excelTutorName($row) : self::NOT_SPECIFIED;
+            $plan['tutors'][] = [
                 'student' => $studentName,
-                'tutor' => $tutorName !== '' ? $tutorName : 'Tutor',
-                'curp' => $this->usableTutorCurp($row['g_curp'], (string) $profile->national_id) ?: 'sin CURP válida',
-                'kinship' => $row['kinship'] !== '' ? $row['kinship'] : 'Tutor',
+                'tutor' => $tutorName,
+                'curp' => $this->usableTutorCurp($row['g_curp'], (string) $profile->national_id) ?? 'sin CURP en el Excel',
+                'kinship' => $row['kinship'] !== '' ? $row['kinship'] : 'sin parentesco',
                 'phone' => $phone ?? '',
                 'email' => $email ?? '',
             ];
-            $writes[] = function () use ($student, $row, $phone, $email) {
-                $this->addTutor($student, $row, $phone, $email);
-            };
             if ($phone !== null) {
-                $phones[] = $this->contactChange($studentName, 'tutor nuevo '.($tutorName !== '' ? $tutorName : 'Tutor'), '', $phone);
+                $plan['phones'][] = $this->change($studentName, 'tutor nuevo '.$tutorName, '', $phone);
             }
             if ($email !== null) {
-                $emails[] = $this->contactChange($studentName, 'tutor nuevo '.($tutorName !== '' ? $tutorName : 'Tutor'), '', $email);
+                $plan['emails'][] = $this->change($studentName, 'tutor nuevo '.$tutorName, '', $email);
+            }
+            $plan['writes'][] = function () use ($student, $row, $phone, $email) {
+                $this->addTutor($student, $row, $phone, $email);
+            };
+        } elseif ($phone !== null) {
+            $first = $student->guardians->first();
+            if ($first?->profile && $this->digits((string) $first->profile->phone_number) !== $phone) {
+                $guardianProfile = $first->profile;
+                $plan['phones'][] = $this->change($studentName, 'tutor '.$this->profileName($guardianProfile), (string) $guardianProfile->phone_number, $phone);
+                $plan['writes'][] = function () use ($guardianProfile, $phone) {
+                    $guardianProfile->phone_number = $phone;
+                    $guardianProfile->save();
+                };
             }
         }
 
-        $addressChanges = $this->planAddress($profile, $row, $studentName);
-        foreach ($addressChanges['fills'] as $fill) {
-            $addresses[] = $fill;
-        }
-        foreach ($addressChanges['writes'] as $write) {
-            $writes[] = $write;
+        $this->planAddress($profile, $row, $studentName, $plan);
+
+        return $plan;
+    }
+
+    /**
+     * @param  array<string, string>  $row
+     * @param  array<string, list<mixed>>  $plan
+     */
+    private function planCurp(Profile $profile, array $row, string $method, string $studentName, array &$plan): void
+    {
+        $dbCurp = strtoupper(trim((string) $profile->national_id));
+        $excelCurp = $row['curp'];
+        if ($method === 'exact' || $excelCurp === '' || $excelCurp === $dbCurp) {
+            return;
         }
 
-        return [
-            'phones' => $phones,
-            'emails' => $emails,
-            'tutors' => $tutors,
-            'addresses' => $addresses,
-            'writes' => $writes,
+        $how = $method === 'near' ? 'CURP parecida y mismo nombre' : 'mismo nombre';
+        if (! $this->validCurp($excelCurp)) {
+            $plan['problems'][] = 'Coincide por '.$how.', pero la CURP del Excel ('.$excelCurp.') no es válida; se conserva '.$dbCurp.'.';
+
+            return;
+        }
+
+        $birth = $this->dateFromCurp($excelCurp);
+        $age = $birth !== null ? \Illuminate\Support\Carbon::parse($birth)->age : null;
+        if ($age === null || $age < 9 || $age > 20) {
+            $plan['problems'][] = 'Coincide por '.$how.', pero la CURP del Excel ('.$excelCurp.') da una fecha de nacimiento imposible'
+                .($birth !== null ? ' ('.$birth.')' : '').'; se conserva '.$dbCurp.'.';
+
+            return;
+        }
+
+        $owner = Profile::query()
+            ->where('national_id', $excelCurp)
+            ->whereKeyNot($profile->id)
+            ->first();
+        if ($owner) {
+            $plan['problems'][] = 'La CURP del Excel '.$excelCurp.' ya pertenece a '.$this->profileName($owner).' (posible duplicado); se conserva '.$dbCurp.'.';
+
+            return;
+        }
+
+        $gender = $this->genderFromCurp($excelCurp);
+        $plan['curps'][] = [
+            'student' => $studentName,
+            'from' => $dbCurp !== '' ? $dbCurp : '—',
+            'to' => $excelCurp,
+            'how' => $how,
         ];
+        $plan['writes'][] = function () use ($profile, $excelCurp, $birth, $gender) {
+            $profile->national_id = $excelCurp;
+            if ($birth !== null) {
+                $profile->birth_date = $birth;
+            }
+            if ($gender !== null) {
+                $profile->gender = $gender;
+            }
+            $profile->save();
+        };
+    }
+
+    /**
+     * @param  array<string, string>  $row
+     * @param  array<string, list<mixed>>  $plan
+     */
+    private function planAddress(Profile $profile, array $row, string $studentName, array &$plan): void
+    {
+        $incoming = [
+            'street_type' => $row['street_type'],
+            'street_name' => $row['street'],
+            'house_number' => $row['exterior'] !== '' ? $row['exterior'] : $row['interior'],
+            'unit_number' => $row['exterior'] !== '' && $row['interior'] !== '' ? $row['interior'] : '',
+            'neighborhood_type' => $row['settlement_type'],
+            'neighborhood_name' => $row['settlement'],
+            'city' => $row['city'],
+        ];
+        if ($incoming['street_name'] === '' && $incoming['neighborhood_name'] === '') {
+            return;
+        }
+
+        $address = $profile->address;
+        $patch = [];
+        foreach (array_keys(self::ADDRESS_FIELDS) as $field) {
+            if ($field === 'unit_number') {
+                if ($incoming['house_number'] !== '' && (string) ($address?->unit_number ?? '') !== $incoming['unit_number']) {
+                    $patch['unit_number'] = $incoming['unit_number'] !== '' ? $incoming['unit_number'] : null;
+                }
+
+                continue;
+            }
+            if ($incoming[$field] === '') {
+                continue;
+            }
+            if ($this->normalizeName((string) ($address?->{$field} ?? '')) !== $this->normalizeName($incoming[$field])) {
+                $patch[$field] = $incoming[$field];
+            }
+        }
+        if ($patch === []) {
+            return;
+        }
+
+        $plan['addresses'][] = [
+            'student' => $studentName,
+            'from' => $this->addressLabel($address?->only(array_keys(self::ADDRESS_FIELDS)) ?? []),
+            'to' => $this->addressLabel(array_merge($address?->only(array_keys(self::ADDRESS_FIELDS)) ?? [], $patch)),
+        ];
+        $plan['writes'][] = function () use ($profile, $address, $patch) {
+            if ($address) {
+                $address->update($patch);
+
+                return;
+            }
+            $created = Address::query()->create(array_merge([
+                'street_type' => self::NOT_SPECIFIED,
+                'street_name' => self::NOT_SPECIFIED,
+                'house_number' => self::NOT_SPECIFIED,
+                'neighborhood_type' => self::NOT_SPECIFIED,
+                'neighborhood_name' => self::NOT_SPECIFIED,
+                'postal_code' => '00000',
+                'city' => self::NOT_SPECIFIED,
+                'state' => self::NOT_SPECIFIED,
+            ], $patch));
+            $profile->address_id = $created->id;
+            $profile->save();
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $parts
+     */
+    private function addressLabel(array $parts): string
+    {
+        $line = trim(implode(' ', array_filter([
+            $parts['street_type'] ?? '',
+            $parts['street_name'] ?? '',
+            $parts['house_number'] ?? '',
+            ($parts['unit_number'] ?? '') !== '' && ($parts['unit_number'] ?? null) !== null ? 'int. '.$parts['unit_number'] : '',
+        ])));
+        $area = trim(implode(' ', array_filter([
+            $parts['neighborhood_type'] ?? '',
+            $parts['neighborhood_name'] ?? '',
+        ])));
+        $label = trim(implode(', ', array_filter([$line, $area, (string) ($parts['city'] ?? '')])));
+
+        return $label !== '' ? $label : '—';
     }
 
     private function matchingGuardian(Student $student, array $row): ?Guardian
     {
         $excelCurp = $this->usableTutorCurp($row['g_curp'], strtoupper(trim((string) $student->profile?->national_id)));
+        $excelName = $this->excelTutorName($row);
 
         foreach ($student->guardians as $guardian) {
             $profile = $guardian->profile;
@@ -294,7 +494,7 @@ class SyncDirectoryDetailsService
             if ($excelCurp !== null && $dbValid && $excelCurp === $dbCurp) {
                 return $guardian;
             }
-            if ($this->namesMatch($this->excelTutorName($row), $this->profileName($profile))) {
+            if ($excelName !== '' && $this->namesMatch($excelName, $this->profileName($profile))) {
                 if ($excelCurp === null || ! $dbValid || $excelCurp === $dbCurp) {
                     return $guardian;
                 }
@@ -309,30 +509,24 @@ class SyncDirectoryDetailsService
         $studentCurp = strtoupper(trim((string) $student->profile?->national_id));
         $guardianCurp = $this->usableTutorCurp($row['g_curp'], $studentCurp);
         if ($guardianCurp === null) {
-            $guardianCurp = 'TUT'.substr(preg_replace('/[^A-Z0-9]/', '', $studentCurp.$student->id) ?? (string) $student->id, 0, 15);
-            while (Profile::query()->where('national_id', $guardianCurp)->exists()) {
-                $guardianCurp = substr($guardianCurp, 0, 16).random_int(0, 9);
-            }
+            $guardianCurp = self::unspecifiedCurp();
         }
 
-        $first = $row['g_name'] !== '' ? $row['g_name'] : 'Tutor';
-        $last = trim($row['g_paterno'].' '.$row['g_materno']) ?: 'Sin apellido';
-        $kinship = $row['kinship'] !== '' ? $row['kinship'] : 'Tutor';
-
+        $kinship = $row['kinship'] !== '' ? $row['kinship'] : null;
         $guardianProfile = Profile::query()->firstOrCreate(
             ['national_id' => $guardianCurp],
             [
-                'first_name' => $first,
-                'last_name' => $last,
+                'first_name' => $row['g_name'] !== '' ? $row['g_name'] : self::NOT_SPECIFIED,
+                'last_name' => trim($row['g_paterno'].' '.$row['g_materno']) ?: self::NOT_SPECIFIED,
                 'gender' => 'O',
                 'phone_number' => $phone,
                 'email' => $email,
             ]
         );
-        if ($phone !== null && $this->digits((string) $guardianProfile->phone_number) !== $phone) {
+        if ($phone !== null) {
             $guardianProfile->phone_number = $phone;
         }
-        if ($email !== null && strcasecmp((string) $guardianProfile->email, $email) !== 0) {
+        if ($email !== null) {
             $guardianProfile->email = $email;
         }
         $guardianProfile->save();
@@ -341,214 +535,192 @@ class SyncDirectoryDetailsService
             ['profile_id' => $guardianProfile->id],
             ['Kinship' => $kinship]
         );
-        if ($this->isBlank((string) $guardian->Kinship) && $kinship !== '') {
-            $guardian->update(['Kinship' => $kinship]);
-        }
-
         $student->guardians()->syncWithoutDetaching([
             $guardian->id => ['relationship' => $kinship],
         ]);
     }
 
     /**
-     * @param  array<string, string>  $row
-     * @return array{fills: list<array<string, string>>, writes: list<callable>}
+     * @return array{0: string, 1: list<array<string, string>>}
      */
-    private function planAddress(Profile $profile, array $row, string $studentName): array
-    {
-        $fills = [];
-        $writes = [];
-        $incoming = [
-            'street_type' => $row['street_type'],
-            'street_name' => $row['street'],
-            'house_number' => $row['exterior'] !== '' ? $row['exterior'] : $row['interior'],
-            'unit_number' => $row['exterior'] !== '' && $row['interior'] !== '' ? $row['interior'] : null,
-            'neighborhood_type' => $row['settlement_type'],
-            'neighborhood_name' => $row['settlement'],
-        ];
-        $hasIncoming = $incoming['street_name'] !== '' || $incoming['neighborhood_name'] !== '' || $incoming['house_number'] !== '';
-        if (! $hasIncoming) {
-            return ['fills' => $fills, 'writes' => $writes];
-        }
-
-        $address = $profile->address;
-        if (! $address) {
-            $fills[] = [
-                'student' => $studentName,
-                'field' => 'domicilio',
-                'from' => '',
-                'to' => trim($incoming['street_type'].' '.$incoming['street_name'].' '.$incoming['house_number']),
-            ];
-            $writes[] = function () use ($profile, $incoming) {
-                $created = Address::query()->create([
-                    'street_type' => $incoming['street_type'] !== '' ? $incoming['street_type'] : 'CALLE',
-                    'street_name' => $incoming['street_name'] !== '' ? $incoming['street_name'] : 'SIN CALLE',
-                    'house_number' => $incoming['house_number'] !== '' ? $incoming['house_number'] : 'S/N',
-                    'unit_number' => $incoming['unit_number'],
-                    'neighborhood_type' => $incoming['neighborhood_type'] !== '' ? $incoming['neighborhood_type'] : 'COLONIA',
-                    'neighborhood_name' => $incoming['neighborhood_name'] !== '' ? $incoming['neighborhood_name'] : 'SIN COLONIA',
-                    'postal_code' => '00000',
-                    'city' => 'Oaxaca de Juárez',
-                    'state' => 'Oaxaca',
-                ]);
-                $profile->address_id = $created->id;
-                $profile->save();
-            };
-
-            return ['fills' => $fills, 'writes' => $writes];
-        }
-
-        $patch = [];
-        foreach (['street_type', 'street_name', 'house_number', 'neighborhood_type', 'neighborhood_name'] as $field) {
-            if ($this->isBlank((string) $address->{$field}) && $incoming[$field] !== '') {
-                $patch[$field] = $incoming[$field];
-                $fills[] = [
-                    'student' => $studentName,
-                    'field' => $field,
-                    'from' => (string) $address->{$field},
-                    'to' => $incoming[$field],
-                ];
-            }
-        }
-        if ($this->isBlank((string) $address->unit_number) && $incoming['unit_number']) {
-            $patch['unit_number'] = $incoming['unit_number'];
-        }
-        if ($patch !== []) {
-            $writes[] = function () use ($address, $patch) {
-                $address->update($patch);
-            };
-        }
-
-        return ['fills' => $fills, 'writes' => $writes];
-    }
-
-    /**
-     * @return list<array<string, string>>
-     */
-    private function readRows(string $path): array
+    public function readRows(string $path): array
     {
         $reader = IOFactory::createReaderForFile($path);
         $reader->setReadDataOnly(true);
         $book = $reader->load($path);
-        $sheet = $book->getSheetByName(ApplyFirstGradeRosterService::SHEET) ?: $book->getSheet(0);
-        if (! $sheet) {
-            throw new RuntimeException('El Excel no tiene una hoja de directorio.');
-        }
 
-        $map = $this->columnMap($sheet);
-        $rows = [];
-        $highest = $sheet->getHighestRow();
-        for ($r = 5; $r <= $highest; $r++) {
-            $row = [
-                'row' => (string) $r,
-                'first' => $this->cell($sheet, $map['first'], $r),
-                'paterno' => $this->cell($sheet, $map['paterno'], $r),
-                'materno' => $this->cell($sheet, $map['materno'], $r),
-                'curp' => strtoupper($this->cell($sheet, $map['curp'], $r)),
-                'street_type' => $this->cell($sheet, $map['street_type'], $r),
-                'street' => $this->cell($sheet, $map['street'], $r),
-                'interior' => $this->cell($sheet, $map['interior'], $r),
-                'exterior' => $this->cell($sheet, $map['exterior'], $r),
-                'settlement_type' => $this->cell($sheet, $map['settlement_type'], $r),
-                'settlement' => $this->cell($sheet, $map['settlement'], $r),
-                'g_paterno' => $this->cell($sheet, $map['g_paterno'], $r),
-                'g_materno' => $this->cell($sheet, $map['g_materno'], $r),
-                'g_name' => $this->cell($sheet, $map['g_name'], $r),
-                'g_curp' => strtoupper($this->cell($sheet, $map['g_curp'], $r)),
-                'phone' => $this->cell($sheet, $map['phone'], $r),
-                'email' => $map['email'] !== '' ? $this->cell($sheet, $map['email'], $r) : '',
-                'kinship' => $this->cell($sheet, $map['kinship'], $r),
-            ];
-            if ($row['curp'] === '' && $row['first'] === '' && $row['paterno'] === '') {
+        foreach ($book->getWorksheetIterator() as $sheet) {
+            $layout = $this->detectLayout($sheet);
+            if ($layout === null) {
                 continue;
             }
-            $rows[] = $row;
+
+            $rows = [];
+            $highest = $sheet->getHighestRow();
+            for ($r = $layout['header_row'] + 1; $r <= $highest; $r++) {
+                $value = fn (string $key) => isset($layout['columns'][$key])
+                    ? $this->cell($sheet, $layout['columns'][$key], $r)
+                    : '';
+
+                $first = $value('first');
+                $paterno = $value('paterno');
+                $materno = $value('materno');
+                $full = $value('full');
+                $studentName = $full !== '' ? $full : trim($first.' '.$paterno.' '.$materno);
+                $curp = strtoupper(preg_replace('/\s+/', '', $value('curp')) ?? '');
+                if ($curp === '' && $studentName === '') {
+                    continue;
+                }
+
+                $rows[] = [
+                    'row' => (string) $r,
+                    'student_name' => $studentName,
+                    'first' => $first,
+                    'paterno' => $paterno,
+                    'materno' => $materno,
+                    'full' => $full,
+                    'curp' => $curp,
+                    'group' => $value('group'),
+                    'tech' => $value('tech'),
+                    'street_type' => $value('street_type'),
+                    'street' => $value('street'),
+                    'interior' => $value('interior'),
+                    'exterior' => $value('exterior'),
+                    'settlement_type' => $value('settlement_type'),
+                    'settlement' => $value('settlement'),
+                    'city' => $value('city'),
+                    'g_paterno' => $value('g_paterno'),
+                    'g_materno' => $value('g_materno'),
+                    'g_name' => $value('g_name'),
+                    'g_curp' => strtoupper(preg_replace('/\s+/', '', $value('g_curp')) ?? ''),
+                    'phone' => $value('phone'),
+                    'email' => $value('email'),
+                    'kinship' => $value('kinship'),
+                ];
+            }
+
+            return [$sheet->getTitle(), $rows];
         }
 
-        return $rows;
+        throw new RuntimeException('El Excel no tiene una hoja con CURP del alumno y número de contacto.');
     }
 
     /**
-     * @return array<string, string>
+     * @return array{header_row: int, columns: array<string, string>}|null
      */
-    private function columnMap($sheet): array
+    private function detectLayout(Worksheet $sheet): ?array
     {
-        $headerG = mb_strtoupper($this->cell($sheet, 'G', 4));
-        $sampleG = strtoupper($this->cell($sheet, 'G', 5));
-        $newLayout = str_contains($headerG, 'CURP') || $this->validCurp($sampleG);
-        $email = $this->findHeaderColumn($sheet, ['CORREO', 'EMAIL', 'E-MAIL', 'MAIL']);
+        $maxColumn = min(Coordinate::columnIndexFromString($sheet->getHighestColumn()), 60);
 
-        if ($newLayout) {
-            return [
-                'first' => 'C',
-                'paterno' => 'D',
-                'materno' => 'E',
-                'curp' => 'G',
-                'street_type' => 'O',
-                'street' => 'P',
-                'interior' => 'Q',
-                'exterior' => 'R',
-                'settlement_type' => 'S',
-                'settlement' => 'T',
-                'g_paterno' => 'U',
-                'g_materno' => 'V',
-                'g_name' => 'W',
-                'g_curp' => 'X',
-                'phone' => 'Y',
-                'kinship' => 'Z',
-                'email' => $email ?? '',
-            ];
-        }
+        for ($headerRow = 1; $headerRow <= 10; $headerRow++) {
+            $headers = [];
+            for ($c = 1; $c <= $maxColumn; $c++) {
+                $column = Coordinate::stringFromColumnIndex($c);
+                $headers[$c] = $this->headerKey($this->cell($sheet, $column, $headerRow));
+            }
+            $studentCurp = array_search(true, array_map(fn (string $h) => str_contains($h, 'CURP'), $headers), true);
+            if ($studentCurp === false) {
+                continue;
+            }
 
-        return [
-            'first' => 'B',
-            'paterno' => 'C',
-            'materno' => 'D',
-            'curp' => 'F',
-            'street_type' => 'N',
-            'street' => 'O',
-            'interior' => 'P',
-            'exterior' => 'Q',
-            'settlement_type' => 'R',
-            'settlement' => 'S',
-            'g_paterno' => 'T',
-            'g_materno' => 'U',
-            'g_name' => 'V',
-            'g_curp' => 'W',
-            'phone' => 'X',
-            'kinship' => 'Y',
-            'email' => $email ?? '',
-        ];
-    }
+            $sections = [];
+            for ($c = 1; $c <= $maxColumn; $c++) {
+                $sections[$c] = $headerRow > 1
+                    ? $this->headerKey($this->cell($sheet, Coordinate::stringFromColumnIndex($c), $headerRow - 1))
+                    : '';
+            }
 
-    private function findHeaderColumn($sheet, array $needles): ?string
-    {
-        $columns = array_merge(range('A', 'Z'), ['AA', 'AB', 'AC', 'AD', 'AE', 'AF']);
-        for ($r = 1; $r <= 6; $r++) {
-            foreach ($columns as $column) {
-                $header = mb_strtoupper($this->cell($sheet, $column, $r));
-                foreach ($needles as $needle) {
-                    if ($header !== '' && str_contains($header, $needle)) {
-                        return $column;
-                    }
+            $tutorStart = null;
+            foreach ($sections as $c => $text) {
+                if ($c > $studentCurp && (str_contains($text, 'TUTOR') || str_contains($text, 'PADRE'))) {
+                    $tutorStart = $c;
+                    break;
                 }
             }
+
+            $columns = [];
+            for ($c = 1; $c <= $maxColumn; $c++) {
+                $column = Coordinate::stringFromColumnIndex($c);
+                $header = $headers[$c];
+                $section = $sections[$c];
+                $isTutor = $tutorStart !== null && $c >= $tutorStart;
+
+                if (str_contains($header, 'CONTACTO') || str_contains($section, 'CONTACTO')) {
+                    $columns['phone'] ??= $column;
+
+                    continue;
+                }
+                if (str_contains($header, 'PARENTESCO') || str_contains($section, 'PARENTESCO')) {
+                    $columns['kinship'] ??= $column;
+
+                    continue;
+                }
+                if (str_contains($header, 'CORREO') || str_contains($header, 'EMAIL') || str_contains($section, 'CORREO')) {
+                    $columns['email'] ??= $column;
+
+                    continue;
+                }
+                if ($header === '') {
+                    continue;
+                }
+
+                if ($isTutor) {
+                    $key = match (true) {
+                        str_contains($header, 'PATERNO') => 'g_paterno',
+                        str_contains($header, 'MATERNO') => 'g_materno',
+                        str_contains($header, 'CURP') => 'g_curp',
+                        str_starts_with($header, 'NOMBRE') => 'g_name',
+                        default => null,
+                    };
+                } else {
+                    $key = match (true) {
+                        str_contains($header, 'CURP') => 'curp',
+                        str_contains($header, 'NOMBRE COMPLETO') => 'full',
+                        str_contains($header, 'PATERNO') => 'paterno',
+                        str_contains($header, 'MATERNO') => 'materno',
+                        str_contains($header, 'NOMBRE DE LA VIALIDAD') => 'street',
+                        $header === 'VIALIDAD' => 'street_type',
+                        str_contains($header, 'INTERIOR') => 'interior',
+                        str_contains($header, 'EXTERIOR') => 'exterior',
+                        str_contains($header, 'NOMBRE DEL ASENTAMIENTO') => 'settlement',
+                        $header === 'ASENTAMIENTO' => 'settlement_type',
+                        str_contains($header, 'MUNICIPIO') => 'city',
+                        $header === 'GRUPO' => 'group',
+                        str_contains($header, 'TECNOLOGIA') || str_contains($header, 'TALLER') => 'tech',
+                        $header === 'NOMBRE' || $header === 'NOMBRE S' || $header === 'NOMBRES' => 'first',
+                        default => null,
+                    };
+                }
+                if ($key !== null) {
+                    $columns[$key] ??= $column;
+                }
+            }
+
+            if (! isset($columns['curp']) || ! isset($columns['phone'])) {
+                continue;
+            }
+
+            return ['header_row' => $headerRow, 'columns' => $columns];
         }
 
         return null;
     }
 
-    private function cell($sheet, string $column, int $row): string
+    private function headerKey(string $value): string
     {
-        if ($column === '') {
-            return '';
-        }
+        $folded = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', mb_strtoupper($value, 'UTF-8')) ?: mb_strtoupper($value, 'UTF-8');
+        $folded = preg_replace('/[^A-Z0-9]+/', ' ', $folded) ?? $folded;
 
+        return trim(preg_replace('/\s+/', ' ', $folded) ?? $folded);
+    }
+
+    private function cell(Worksheet $sheet, string $column, int $row): string
+    {
         return trim((string) $sheet->getCell($column.$row)->getFormattedValue());
     }
 
     /**
-     * @param  array{row: array<string, string>, enrollment: ?Enrollment, reason: string}  $match
+     * @param  array{row: array<string, string>, enrollment: ?Enrollment, method: string, reason: string}  $match
      * @return array{row: string, curp: string, name: string, reason: string}
      */
     private function issue(array $match, string $reason): array
@@ -556,7 +728,7 @@ class SyncDirectoryDetailsService
         return [
             'row' => $match['row']['row'],
             'curp' => $match['row']['curp'],
-            'name' => $this->excelStudentName($match['row']),
+            'name' => $match['row']['student_name'],
             'reason' => $reason,
         ];
     }
@@ -564,7 +736,7 @@ class SyncDirectoryDetailsService
     /**
      * @return array{student: string, who: string, from: string, to: string}
      */
-    private function contactChange(string $student, string $who, string $from, string $to): array
+    private function change(string $student, string $who, string $from, string $to): array
     {
         return [
             'student' => $student,
@@ -572,12 +744,6 @@ class SyncDirectoryDetailsService
             'from' => $from !== '' ? $from : '—',
             'to' => $to,
         ];
-    }
-
-    private function hasTutorIdentity(array $row): bool
-    {
-        return $this->excelTutorName($row) !== ''
-            || $this->usableTutorCurp($row['g_curp'], '') !== null;
     }
 
     private function usableTutorCurp(string $curp, string $studentCurp): ?string
@@ -595,14 +761,40 @@ class SyncDirectoryDetailsService
 
     private function isSentinelCurp(string $curp): bool
     {
-        return str_starts_with(strtoupper($curp), 'TUT');
+        $curp = strtoupper($curp);
+
+        return str_starts_with($curp, 'TUT') || str_starts_with($curp, self::NOT_SPECIFIED);
+    }
+
+    /**
+     * La CURP del perfil es obligatoria y única, así que el tutor sin CURP lleva un consecutivo.
+     */
+    public static function unspecifiedCurp(): string
+    {
+        $taken = Profile::query()
+            ->where('national_id', 'like', self::NOT_SPECIFIED.'%')
+            ->pluck('national_id')
+            ->map(fn (string $value) => preg_match('/^'.self::NOT_SPECIFIED.'_(\d+)$/', $value, $m) === 1 ? (int) $m[1] : 0)
+            ->max() ?? 0;
+
+        return self::NOT_SPECIFIED.'_'.($taken + 1);
     }
 
     private function isBlank(string $value): bool
     {
         $folded = $this->normalizeName($value);
 
-        return $folded === '' || in_array($folded, ['SINCALLE', 'SINCOLONIA', 'SN', '00000', 'SINAPELLIDO', 'TUTOR'], true);
+        return $folded === '' || in_array($folded, ['SINCALLE', 'SINCOLONIA', 'SN', '00000', 'SINAPELLIDO', 'TUTOR', 'NOESPECIFICADO'], true);
+    }
+
+    private function sameName(string $left, string $right): bool
+    {
+        $leftTokens = $this->nameTokens($left);
+        $rightTokens = $this->nameTokens($right);
+        sort($leftTokens);
+        sort($rightTokens);
+
+        return $leftTokens !== [] && count($leftTokens) >= 2 && $leftTokens === $rightTokens;
     }
 
     private function namesMatch(string $left, string $right): bool
@@ -612,14 +804,10 @@ class SyncDirectoryDetailsService
         if ($leftTokens === [] || $rightTokens === []) {
             return false;
         }
-        if ($leftTokens === $rightTokens) {
-            return true;
-        }
         $shorter = count($leftTokens) <= count($rightTokens) ? $leftTokens : $rightTokens;
         $longer = count($leftTokens) <= count($rightTokens) ? $rightTokens : $leftTokens;
-        $missing = array_diff($shorter, $longer);
 
-        return $missing === [] && count($shorter) >= 2;
+        return array_diff($shorter, $longer) === [] && count($shorter) >= 2;
     }
 
     /**
@@ -632,15 +820,21 @@ class SyncDirectoryDetailsService
 
         return array_values(array_filter(
             $parts,
-            fn (string $token) => strlen($token) >= 3 && ! in_array($token, ['DEL', 'LAS', 'LOS', 'DE'], true)
+            fn (string $token) => strlen($token) >= 3 && ! in_array($token, ['DEL', 'LAS', 'LOS'], true)
         ));
     }
 
     private function digits(string $value): ?string
     {
-        $digits = preg_replace('/\D/', '', $value) ?? '';
+        $parts = preg_split('/[,;\/]|\s-\s|\s+y\s+|\s+o\s+/iu', $value) ?: [$value];
+        foreach ($parts as $part) {
+            $digits = preg_replace('/\D/', '', $part) ?? '';
+            if (strlen($digits) === 10) {
+                return $digits;
+            }
+        }
 
-        return strlen($digits) === 10 ? $digits : null;
+        return null;
     }
 
     private function validEmail(string $value): ?string
@@ -658,12 +852,27 @@ class SyncDirectoryDetailsService
         return preg_match('/^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$/', $curp) === 1;
     }
 
-    /**
-     * @param  array<string, string>  $row
-     */
-    private function excelStudentName(array $row): string
+    private function dateFromCurp(string $curp): ?string
     {
-        return trim($row['first'].' '.$row['paterno'].' '.$row['materno']);
+        if (! preg_match('/^[A-Z]{4}(\d{2})(\d{2})(\d{2})[HM][A-Z]{5}([A-Z0-9])/', $curp, $matches)) {
+            return null;
+        }
+
+        $year = (int) $matches[1];
+        $year += ctype_alpha($matches[4]) ? 2000 : 1900;
+        $month = (int) $matches[2];
+        $day = (int) $matches[3];
+
+        return checkdate($month, $day, $year) ? sprintf('%04d-%02d-%02d', $year, $month, $day) : null;
+    }
+
+    private function genderFromCurp(string $curp): ?string
+    {
+        return match (substr($curp, 10, 1)) {
+            'H' => 'M',
+            'M' => 'F',
+            default => null,
+        };
     }
 
     /**

@@ -28,7 +28,6 @@ use App\Services\WorkshopEnrollmentWriter;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use RuntimeException;
@@ -37,6 +36,8 @@ use Throwable;
 class ApplyFirstGradeRosterService
 {
     public const SHEET = 'DIRECTORIO PRIMERO 26-27';
+
+    private const NOT_SPECIFIED = SyncDirectoryDetailsService::NOT_SPECIFIED;
 
     public function __construct(
         private readonly ConvertPreEnrollmentToStudentService $converter,
@@ -699,15 +700,15 @@ class ApplyFirstGradeRosterService
         $phone = strlen($phone) === 10 ? $phone : null;
 
         $address = Address::query()->create([
-            'street_type' => $row['street_type'] !== '' ? $row['street_type'] : 'CALLE',
-            'street_name' => $row['street'] !== '' ? $row['street'] : 'SIN CALLE',
-            'house_number' => $row['exterior'] !== '' ? $row['exterior'] : ($row['interior'] !== '' ? $row['interior'] : 'S/N'),
+            'street_type' => $row['street_type'] !== '' ? $row['street_type'] : self::NOT_SPECIFIED,
+            'street_name' => $row['street'] !== '' ? $row['street'] : self::NOT_SPECIFIED,
+            'house_number' => $row['exterior'] !== '' ? $row['exterior'] : ($row['interior'] !== '' ? $row['interior'] : self::NOT_SPECIFIED),
             'unit_number' => $row['exterior'] !== '' && $row['interior'] !== '' ? $row['interior'] : null,
-            'neighborhood_type' => $row['settlement_type'] !== '' ? $row['settlement_type'] : 'COLONIA',
-            'neighborhood_name' => $row['settlement'] !== '' ? $row['settlement'] : 'SIN COLONIA',
+            'neighborhood_type' => $row['settlement_type'] !== '' ? $row['settlement_type'] : self::NOT_SPECIFIED,
+            'neighborhood_name' => $row['settlement'] !== '' ? $row['settlement'] : self::NOT_SPECIFIED,
             'postal_code' => '00000',
-            'city' => 'Oaxaca de Juárez',
-            'state' => 'Oaxaca',
+            'city' => self::NOT_SPECIFIED,
+            'state' => self::NOT_SPECIFIED,
         ]);
 
         $profile = Profile::query()->create([
@@ -720,18 +721,7 @@ class ApplyFirstGradeRosterService
             'address_id' => $address->id,
         ]);
 
-        $studentData = ['profile_id' => $profile->id];
-        if (Schema::hasColumn('students', 'place_of_birth')) {
-            $studentData['place_of_birth'] = 'Oaxaca';
-        }
-        if (Schema::hasColumn('students', 'previous_school')) {
-            $studentData['previous_school'] = 'No registrada';
-        }
-        if (Schema::hasColumn('students', 'current_average')) {
-            $studentData['current_average'] = 8;
-        }
-
-        $student = Student::query()->create($studentData);
+        $student = Student::query()->create(['profile_id' => $profile->id]);
 
         $this->attachGuardian($student, $row, $phone);
         $this->placeInDestination($student, $year, $group, $workshop, isNewAdmission: true);
@@ -743,23 +733,20 @@ class ApplyFirstGradeRosterService
     {
         $guardianCurp = $row['g_curp'];
         if ($guardianCurp === '' || $guardianCurp === $row['curp'] || ! $this->validCurp($guardianCurp)) {
-            $guardianCurp = 'TUT'.substr(preg_replace('/[^A-Z0-9]/', '', $row['curp']) ?? $row['curp'], 0, 15);
-        }
-        if (strlen($guardianCurp) < 4) {
-            return;
+            $guardianCurp = SyncDirectoryDetailsService::unspecifiedCurp();
         }
 
         $guardianProfile = Profile::query()->firstOrCreate(
             ['national_id' => $guardianCurp],
             [
-                'first_name' => $row['g_name'] !== '' ? $row['g_name'] : 'Tutor',
-                'last_name' => trim($row['g_paterno'].' '.$row['g_materno']) ?: 'Sin apellido',
+                'first_name' => $row['g_name'] !== '' ? $row['g_name'] : self::NOT_SPECIFIED,
+                'last_name' => trim($row['g_paterno'].' '.$row['g_materno']) ?: self::NOT_SPECIFIED,
                 'gender' => 'O',
                 'phone_number' => $phone,
             ]
         );
 
-        $kinship = $row['kinship'] !== '' ? $row['kinship'] : 'Tutor';
+        $kinship = $row['kinship'] !== '' ? $row['kinship'] : null;
         $guardian = Guardian::query()->firstOrCreate(
             ['profile_id' => $guardianProfile->id],
             ['Kinship' => $kinship]

@@ -32,6 +32,7 @@ class CredentialPrint extends Model
         'front_printed_at',
         'back_printed_at',
         'completed_at',
+        'open_student_id',
     ];
 
     protected function casts(): array
@@ -54,6 +55,15 @@ class CredentialPrint extends Model
             if (empty($card->uuid)) {
                 $card->uuid = (string) Str::uuid();
             }
+        });
+
+        static::saving(function (CredentialPrint $card): void {
+            $card->open_student_id = self::openStudentId(
+                $card->student_id,
+                $card->discarded_at,
+                $card->front_status,
+                $card->back_status
+            );
         });
     }
 
@@ -107,6 +117,21 @@ class CredentialPrint extends Model
         return $this->front_status === CredentialSideStatus::Printed
             && $this->back_status === CredentialSideStatus::Pending
             && $this->discarded_at === null;
+    }
+
+    public static function openStudentId(mixed $studentId, mixed $discardedAt, mixed $front, mixed $back): ?int
+    {
+        if ($discardedAt !== null || $studentId === null) {
+            return null;
+        }
+
+        $frontValue = $front instanceof \BackedEnum ? $front->value : (string) $front;
+        $backValue = $back instanceof \BackedEnum ? $back->value : (string) $back;
+        $open = $frontValue === CredentialSideStatus::Pending->value
+            || ($frontValue === CredentialSideStatus::Printed->value
+                && $backValue === CredentialSideStatus::Pending->value);
+
+        return $open ? (int) $studentId : null;
     }
 
     /** Tarjetas sin terminar y no descartadas: bloquean un envío nuevo del mismo alumno. */

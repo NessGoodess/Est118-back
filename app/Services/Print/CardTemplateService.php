@@ -298,7 +298,7 @@ class CardTemplateService
             ['key' => 'group', 'label' => 'Grupo'],
             ['key' => 'grade_group', 'label' => 'Grado y grupo'],
             ['key' => 'curp', 'label' => 'CURP'],
-            ['key' => 'credential_id', 'label' => 'Folio'],
+            ['key' => 'credential_id', 'label' => 'CURP (folio)'],
             ['key' => 'address', 'label' => 'Dirección'],
             ['key' => 'workshop', 'label' => 'Taller'],
             ['key' => 'tutor', 'label' => 'Tutor'],

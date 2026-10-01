@@ -21,6 +21,11 @@ Broadcast::channel('credential-read-channel', function ($user) {
     ] : false;
 });
 
+// Private channel for NFC credential assignment progress (reception agent)
+Broadcast::channel('nfc-assignments', function ($user) {
+    return $user->can('view students');
+});
+
 // Canal de equipo para preinscripciones (base para chat futuro entre usuarios del módulo)
 Broadcast::channel('team.pre-enrollments', function ($user) {
     return $user->can('view pre-enrollments') ? [

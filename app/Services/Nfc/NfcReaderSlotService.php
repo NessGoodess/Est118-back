@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Nfc;
 
 use App\Models\NfcReaderSlot;
 use Illuminate\Support\Collection;

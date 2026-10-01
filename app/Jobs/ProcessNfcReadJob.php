@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Events\CredentialReadEvent;
 use App\Models\NfcReadEvent;
-use App\Services\NfcAttendanceService;
+use App\Services\Nfc\NfcAttendanceService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

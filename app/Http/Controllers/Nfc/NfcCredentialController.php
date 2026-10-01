@@ -1,11 +1,12 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Nfc;
 
 use App\Events\CredentialReadEvent;
+use App\Http\Controllers\Controller;
 use App\Jobs\ProcessNfcReadJob;
 use App\Models\NfcReadEvent;
-use App\Services\NfcReaderSlotService;
+use App\Services\Nfc\NfcReaderSlotService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;

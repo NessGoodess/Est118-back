@@ -9,6 +9,8 @@ return new class extends Migration
 {
     public function up(): void
     {
+        $this->repairPartialAttempt();
+
         $duplicates = DB::table('credential_prints')
             ->select('student_id')
             ->whereNull('discarded_at')
@@ -31,12 +33,22 @@ return new class extends Migration
         }
 
         Schema::table('credential_prints', function (Blueprint $table) {
-            $table->unsignedBigInteger('open_student_id')
-                ->nullable()
-                ->storedAs(
-                    "CASE WHEN discarded_at IS NULL AND (front_status = 'pending' OR (front_status = 'printed' AND back_status = 'pending')) THEN student_id END"
-                )
-                ->unique();
+            $table->unsignedBigInteger('open_student_id')->nullable();
+        });
+
+        DB::table('credential_prints')
+            ->whereNull('discarded_at')
+            ->where(function ($q) {
+                $q->where('front_status', 'pending')
+                    ->orWhere(function ($inner) {
+                        $inner->where('front_status', 'printed')
+                            ->where('back_status', 'pending');
+                    });
+            })
+            ->update(['open_student_id' => DB::raw('student_id')]);
+
+        Schema::table('credential_prints', function (Blueprint $table) {
+            $table->unique('open_student_id');
         });
     }
 
@@ -45,6 +57,41 @@ return new class extends Migration
         Schema::table('credential_prints', function (Blueprint $table) {
             $table->dropUnique(['open_student_id']);
             $table->dropColumn('open_student_id');
+        });
+    }
+
+    /**
+     * MySQL no puede usar una columna generada basada en student_id: intenta
+     * copiar su llave foránea y falla con 1215. Si un intento anterior dejó
+     * esa columna y quitó la llave, se corrige antes de crear la columna real.
+     */
+    private function repairPartialAttempt(): void
+    {
+        if (Schema::hasColumn('credential_prints', 'open_student_id')) {
+            Schema::table('credential_prints', function (Blueprint $table) {
+                $table->dropUnique(['open_student_id']);
+                $table->dropColumn('open_student_id');
+            });
+        }
+
+        if (DB::getDriverName() !== 'mysql') {
+            return;
+        }
+
+        $foreignKey = DB::selectOne(
+            "SELECT CONSTRAINT_NAME
+             FROM information_schema.TABLE_CONSTRAINTS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'credential_prints'
+               AND CONSTRAINT_NAME = 'credential_prints_student_id_foreign'"
+        );
+
+        if ($foreignKey) {
+            return;
+        }
+
+        Schema::table('credential_prints', function (Blueprint $table) {
+            $table->foreign('student_id')->references('id')->on('students')->cascadeOnDelete();
         });
     }
 };

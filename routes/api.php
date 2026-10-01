@@ -24,8 +24,10 @@ use App\Http\Controllers\FirstGradeGroupAssignmentController;
 use App\Http\Controllers\FirstGradeWorkshopAssignmentController;
 use App\Http\Controllers\GeneralAttendanceController;
 use App\Http\Controllers\NewIntakeController;
-use App\Http\Controllers\NfcCredentialController;
-use App\Http\Controllers\NfcReaderSlotController;
+use App\Http\Controllers\Nfc\NfcAgentController;
+use App\Http\Controllers\Nfc\NfcAssignmentController;
+use App\Http\Controllers\Nfc\NfcCredentialController;
+use App\Http\Controllers\Nfc\NfcReaderSlotController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ScheduleController;
 // enums
@@ -131,6 +133,11 @@ Route::prefix('agent')->middleware([
     Route::post('/print-jobs/{printJob}/fail', [PrintAgentController::class, 'fail']);
     Route::get('/print-jobs/{printJob}/assets/front', [PrintAgentController::class, 'frontAsset']);
     Route::get('/print-jobs/{printJob}/assets/back', [PrintAgentController::class, 'backAsset']);
+
+    Route::get('/nfc-jobs/next', [NfcAgentController::class, 'next']);
+    Route::post('/nfc-jobs/{nfcAssignment}/progress', [NfcAgentController::class, 'progress']);
+    Route::post('/nfc-jobs/{nfcAssignment}/complete', [NfcAgentController::class, 'complete']);
+    Route::post('/nfc-jobs/{nfcAssignment}/fail', [NfcAgentController::class, 'fail']);
 });
 
 /**
@@ -160,6 +167,17 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('permission:edit students');
     Route::get('/print-agent/status', [PrintJobController::class, 'agentStatus'])
         ->middleware('permission:view students');
+
+    Route::get('/nfc-assignments/active', [NfcAssignmentController::class, 'active'])
+        ->middleware('permission:view students');
+    Route::get('/nfc-assignments/latest-by-students', [NfcAssignmentController::class, 'latestByStudents'])
+        ->middleware('permission:view students');
+    Route::post('/nfc-assignments', [NfcAssignmentController::class, 'store'])
+        ->middleware('permission:edit students');
+    Route::get('/nfc-assignments/{nfcAssignment}', [NfcAssignmentController::class, 'show'])
+        ->middleware('permission:view students');
+    Route::post('/nfc-assignments/{nfcAssignment}/cancel', [NfcAssignmentController::class, 'cancel'])
+        ->middleware('permission:edit students');
     Route::post('/print-agent/token', [PrintJobController::class, 'issueAgentToken'])
         ->middleware('role:admin');
 

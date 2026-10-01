@@ -1,12 +1,13 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Nfc;
 
 use App\Enums\NfcReaderAudience;
 use App\Enums\NfcReaderDirection;
 use App\Events\CredentialReadEvent;
+use App\Http\Controllers\Controller;
 use App\Models\NfcReaderSlot;
-use App\Services\NfcReaderSlotService;
+use App\Services\Nfc\NfcReaderSlotService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;

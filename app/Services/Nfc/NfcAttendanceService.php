@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Nfc;
 
 use App\Enums\AttendanceSource;
 use App\Enums\EnrollmentStatus;
@@ -58,9 +58,9 @@ class NfcAttendanceService
             ];
         }
 
-        $credentialId = $data['credential_id'] ?? null;
+        $credentialId = strtoupper(trim(rtrim((string) ($data['credential_id'] ?? ''), "\0")));
 
-        if (! $credentialId || $credentialId === 'Null') {
+        if ($credentialId === '' || $credentialId === 'NULL') {
             return $payload + [
                 'event' => 'card_inserted',
                 'status' => 'warning',

@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Models\CredentialPrint;
+use App\Models\PrintJob;
+use App\Observers\CredentialPrintObserver;
+use App\Observers\PrintJobObserver;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\ServiceProvider;
@@ -21,6 +25,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        PrintJob::observe(PrintJobObserver::class);
+        CredentialPrint::observe(CredentialPrintObserver::class);
+
         ResetPassword::createUrlUsing(function (object $notifiable, string $token) {
             return config('app.frontend_url')
                 . "/password-reset/$token"

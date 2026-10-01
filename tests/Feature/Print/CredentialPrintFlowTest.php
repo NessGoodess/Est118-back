@@ -7,6 +7,8 @@ use App\Enums\CredentialSideStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\PrintJobStatus;
+use App\Events\CredentialPrintUpdated;
+use App\Events\PrintJobUpdated;
 use App\Jobs\RenderStudentCardJob;
 use App\Models\AcademicYear;
 use App\Models\CardDesign;
@@ -25,6 +27,7 @@ use App\Services\Print\PrintJobService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
@@ -477,6 +480,37 @@ class CredentialPrintFlowTest extends TestCase
         $pending = app(CredentialPrintService::class)->pending();
         $this->assertSame(1, $pending[0]['pending_count']);
         $this->assertSame('migrated', $pending[0]['reason']);
+    }
+
+    public function test_completing_a_front_broadcasts_the_job_and_the_card(): void
+    {
+        $ana = $this->makeStudent('ANA140111MOCRRNB5', 'Ana', 'Realtime');
+        $this->enroll($ana);
+        app(CredentialPrintService::class)->createBatch(
+            [$ana->id],
+            $this->user,
+            $this->design->uuid
+        );
+        $job = PrintJob::query()->firstOrFail();
+
+        Event::fake([PrintJobUpdated::class, CredentialPrintUpdated::class]);
+        app(PrintJobService::class)->markCompleted($job);
+
+        Event::assertDispatched(PrintJobUpdated::class, function (PrintJobUpdated $event) use ($job) {
+            return ($event->job['id'] ?? null) === $job->id
+                && ($event->job['status'] ?? null) === PrintJobStatus::Completed->value
+                && ($event->job['batch_uuid'] ?? null) !== null
+                && ! array_key_exists('payload', $event->job)
+                && ! array_key_exists('payload_json', $event->job);
+        });
+        Event::assertDispatched(CredentialPrintUpdated::class, function (CredentialPrintUpdated $event) use ($job) {
+            $jobs = $event->card['jobs'] ?? [];
+
+            return ($event->card['id'] ?? null) === $job->credential_print_id
+                && ($event->card['front_status'] ?? null) === CredentialSideStatus::Printed->value
+                && is_array($jobs)
+                && collect($jobs)->every(fn ($row) => is_array($row) && ! array_key_exists('payload', $row));
+        });
     }
 
     /**

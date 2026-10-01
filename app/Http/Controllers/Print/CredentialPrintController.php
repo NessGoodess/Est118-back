@@ -259,6 +259,7 @@ class CredentialPrintController extends Controller
             'back_printed_at' => $card->back_printed_at?->toIso8601String(),
             'completed_at' => $card->completed_at?->toIso8601String(),
             'created_at' => $card->created_at?->toIso8601String(),
+            'updated_at' => $card->updated_at?->toIso8601String(),
             'jobs' => $card->printJobs
                 ->sortBy('id')
                 ->values()
@@ -299,6 +300,7 @@ class CredentialPrintController extends Controller
             'claimed_at' => $job->claimed_at?->toIso8601String(),
             'completed_at' => $job->completed_at?->toIso8601String(),
             'created_at' => $job->created_at?->toIso8601String(),
+            'updated_at' => $job->updated_at?->toIso8601String(),
             'created_by_name' => $job->creator?->name,
             'cancelled_by_name' => $job->canceller?->name,
             'cancelled_at' => $job->cancelled_at?->toIso8601String(),

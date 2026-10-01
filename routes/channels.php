@@ -26,6 +26,11 @@ Broadcast::channel('nfc-assignments', function ($user) {
     return $user->can('view students');
 });
 
+// Private channel for credential print progress (reception panel)
+Broadcast::channel('print-jobs', function ($user) {
+    return $user->can('view students');
+});
+
 // Canal de equipo para preinscripciones (base para chat futuro entre usuarios del módulo)
 Broadcast::channel('team.pre-enrollments', function ($user) {
     return $user->can('view pre-enrollments') ? [

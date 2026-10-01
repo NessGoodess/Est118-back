@@ -24,6 +24,11 @@ class PrintJobService
 
     public const PAUSE_TTL_SECONDS = 86400;
 
+    /**
+     * heartbeatStatus() can call pauseQueue(), which publishes. This stops that loop.
+     */
+    private bool $publishingAgentStatus = false;
+
     public function __construct(
         private readonly StudentCardRenderService $cards,
         private readonly CardTemplateService $templates
@@ -342,6 +347,8 @@ class PrintJobService
             );
         }
 
+        $this->publishAgentStatus($printerId);
+
         return $payload;
     }
 
@@ -516,6 +523,8 @@ class PrintJobService
             'reason' => $reason,
             'paused_at' => now()->toIso8601String(),
         ], self::PAUSE_TTL_SECONDS);
+
+        $this->publishAgentStatus($printerId);
     }
 
     public function isQueuePaused(string $printerId): bool
@@ -535,6 +544,63 @@ class PrintJobService
     public function clearPause(string $printerId): void
     {
         Cache::forget($this->pauseCacheKey($printerId));
+
+        $this->publishAgentStatus($printerId);
+    }
+
+    /**
+     * Broadcast only when the panel would show something different.
+     * seen_at changes on every heartbeat and is not part of the signature.
+     */
+    private function publishAgentStatus(string $printerId): void
+    {
+        if ($this->publishingAgentStatus) {
+            return;
+        }
+
+        $this->publishingAgentStatus = true;
+        try {
+            $status = $this->heartbeatStatus($printerId);
+            $signature = $this->agentStatusSignature($status);
+            $key = 'print_agent_broadcast:'.$printerId;
+            if (Cache::get($key) === $signature) {
+                return;
+            }
+
+            Cache::put($key, $signature, self::PAUSE_TTL_SECONDS);
+            app(PrintStatusBroadcaster::class)->agent($status);
+        } finally {
+            $this->publishingAgentStatus = false;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $status
+     */
+    private function agentStatusSignature(array $status): string
+    {
+        $slice = [];
+        foreach ([
+            'online',
+            'queue_paused',
+            'pause_reason',
+            'cards_available',
+            'out_of_cards',
+            'out_of_ribbon',
+            'ribbon_low',
+            'cleaning_required',
+            'cleaning_due',
+            'card_jam',
+            'drawer_open',
+            'offline',
+            'blocks_queue',
+            'issue',
+            'user_message',
+        ] as $field) {
+            $slice[$field] = $status[$field] ?? null;
+        }
+
+        return json_encode($slice) ?: '';
     }
 
     private function syncCard(PrintJob $job): void

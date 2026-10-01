@@ -120,7 +120,7 @@ class EnrollDirectoryMissingService
 
                 continue;
             }
-            $workshopCode = $this->workshopCode($row['tech']);
+            $workshopCode = self::workshopCode($row['tech']);
             $workshop = $workshopCode ? $workshops->get($workshopCode) : null;
             if (! $workshop) {
                 $skipped[] = $this->issue($row, 'La tecnología "'.$row['tech'].'" no está en el catálogo.');
@@ -444,7 +444,7 @@ class EnrollDirectoryMissingService
         return null;
     }
 
-    private function workshopCode(string $raw): ?string
+    public static function workshopCode(string $raw): ?string
     {
         $raw = trim($raw);
         if (isset(self::TECH_CODES[$raw])) {

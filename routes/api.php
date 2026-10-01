@@ -533,6 +533,9 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
     Route::get('/grades', [GradeLevelController::class, 'index'])
         ->middleware('permission:view students');
 
+    Route::get('/academic-years', [StudentController::class, 'academicYears'])
+        ->middleware('permission:view students');
+
     Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
 
     Route::post('/export-with-template', [StudentExportController::class, 'exportWithTemplate'])

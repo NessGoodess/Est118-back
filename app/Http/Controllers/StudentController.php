@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\EnrollmentStatus;
 use App\Http\Requests\UpdateStudentRequest;
 use App\Http\Resources\StudentDetailResource;
 use App\Http\Resources\StudentListItemResource;
+use App\Models\AcademicYear;
 use App\Models\Student;
 use App\Services\StudentPhotoPathService;
 use App\Services\StudentPhotoService;
@@ -12,6 +14,7 @@ use App\Services\StudentsService;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Validation\Rule;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -76,11 +79,50 @@ class StudentController extends Controller
     }
 
     /**
-     * Get all students by grade
+     * Cycles available to the directory. Active cycle first, then newest.
      */
-    public function getStudentsByGrade(int $grade_id): JsonResponse
+    public function academicYears(): JsonResponse
     {
-        $students = $this->studentsService->listByGrade($grade_id);
+        $years = AcademicYear::query()
+            ->orderByDesc('is_active')
+            ->orderByDesc('starts_on')
+            ->orderByDesc('year_start')
+            ->get(['id', 'year_start', 'year_end', 'description', 'is_active']);
+
+        return response()->json([
+            'success' => true,
+            'data' => $years,
+        ]);
+    }
+
+    /**
+     * Students of one grade in one academic year (defaults to the active cycle).
+     */
+    public function getStudentsByGrade(Request $request, int $grade_id): JsonResponse
+    {
+        $validated = $request->validate([
+            'academic_year_id' => ['nullable', 'integer', 'exists:academic_years,id'],
+            'status' => ['nullable', 'array'],
+            'status.*' => ['string', Rule::enum(EnrollmentStatus::class)],
+        ]);
+
+        $yearId = $this->studentsService->resolveYearId(
+            isset($validated['academic_year_id']) ? (int) $validated['academic_year_id'] : null
+        );
+
+        if ($yearId === null) {
+            return response()->json([
+                'success' => true,
+                'data' => [],
+            ]);
+        }
+
+        $statuses = $validated['status'] ?? null;
+        if ($statuses === []) {
+            $statuses = null;
+        }
+
+        $students = $this->studentsService->listByGrade($grade_id, $yearId, $statuses);
 
         return response()->json([
             'success' => true,

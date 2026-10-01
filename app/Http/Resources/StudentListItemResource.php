@@ -28,6 +28,9 @@ class StudentListItemResource extends JsonResource
         $enrollmentStatusValue = $enrollmentStatus instanceof \BackedEnum
             ? $enrollmentStatus->value
             : $enrollmentStatus;
+        $academicYear = ($year?->year_start && $year?->year_end)
+            ? $year->year_start.'-'.$year->year_end
+            : null;
 
         return [
             'id' => $student->id,
@@ -39,6 +42,7 @@ class StudentListItemResource extends JsonResource
             'phone' => $student->profile?->phone_number,
             'grade_level' => $grade,
             'class_group' => $group,
+            'academic_year' => $academicYear,
             'enrollment_status' => $enrollmentStatusValue,
             /** @compat index payload */
             'current_grade' => $grade,

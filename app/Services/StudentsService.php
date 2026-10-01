@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\AcademicYear;
 use App\Models\Address;
 use App\Models\Student;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use RuntimeException;
 
@@ -83,19 +85,63 @@ class StudentsService
         ])->get();
     }
 
-    public function listByGrade(int $gradeId): Collection
+    /**
+     * Explicit cycle, otherwise the active one, otherwise the most recent.
+     */
+    public function resolveYearId(?int $yearId): ?int
     {
-        return Student::with([
-            'profile',
-            'enrollments.classGroup.gradeLevel',
-            'enrollments.classGroup.academicYear',
-            'enrollments.classGroup.schoolClasses.subject',
-        ])
-            ->whereHas('enrollments', function ($q) use ($gradeId) {
-                $q->where('status', 'active')
-                    ->whereHas('classGroup', function ($q) use ($gradeId) {
-                        $q->where('grade_level_id', $gradeId);
+        if ($yearId !== null) {
+            return AcademicYear::query()->whereKey($yearId)->exists() ? $yearId : null;
+        }
+
+        $activeId = AcademicYear::query()->where('is_active', true)->value('id');
+        if ($activeId !== null) {
+            return (int) $activeId;
+        }
+
+        $latestId = AcademicYear::query()
+            ->orderByDesc('starts_on')
+            ->orderByDesc('year_start')
+            ->value('id');
+
+        return $latestId !== null ? (int) $latestId : null;
+    }
+
+    /**
+     * Students enrolled in a grade for one academic year, any status unless filtered.
+     *
+     * The year is taken from the class group so older enrollments with a null
+     * academic_year_id still match the cycle they belonged to.
+     *
+     * @param  list<string>|null  $statuses
+     */
+    public function listByGrade(int $gradeId, int $yearId, ?array $statuses = null): Collection
+    {
+        return Student::query()
+            ->with([
+                'profile',
+                'enrollments' => function ($query) use ($gradeId, $yearId, $statuses) {
+                    $query->whereHas('classGroup', function (Builder $group) use ($gradeId, $yearId) {
+                        $group->where('grade_level_id', $gradeId)
+                            ->where('academic_year_id', $yearId);
                     });
+                    if ($statuses) {
+                        $query->whereIn('status', $statuses);
+                    }
+                    $query->with([
+                        'classGroup.gradeLevel',
+                        'classGroup.academicYear',
+                    ]);
+                },
+            ])
+            ->whereHas('enrollments', function ($query) use ($gradeId, $yearId, $statuses) {
+                if ($statuses) {
+                    $query->whereIn('status', $statuses);
+                }
+                $query->whereHas('classGroup', function (Builder $group) use ($gradeId, $yearId) {
+                    $group->where('grade_level_id', $gradeId)
+                        ->where('academic_year_id', $yearId);
+                });
             })
             ->get();
     }

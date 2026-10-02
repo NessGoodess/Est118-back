@@ -573,6 +573,11 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
     Route::patch('/{student}', [StudentController::class, 'update'])
         ->middleware('permission:edit students');
 
+    Route::patch('/{student}/guardians/{guardian}', [StudentController::class, 'updateGuardian'])
+        ->whereNumber('student')
+        ->whereNumber('guardian')
+        ->middleware('permission:edit students');
+
     Route::delete('/{student}', [StudentController::class, 'destroy'])
         ->middleware('permission:delete students');
 
@@ -581,6 +586,10 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
 
     Route::post('/{student}/resend-verification', [StudentController::class, 'resendVerification'])
         ->middleware('permission:edit students');
+
+    Route::get('/{student}/photo-history', [StudentController::class, 'photoHistory'])
+        ->whereNumber('student')
+        ->middleware('permission:view student photos');
 
     Route::get('/{student}/photo-status', [StudentController::class, 'photoStatus'])
         ->middleware('permission:view student photos|manage student photos');

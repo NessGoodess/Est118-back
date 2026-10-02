@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
+use App\Http\Requests\UpdateStudentGuardianRequest;
 use App\Http\Requests\UpdateStudentRequest;
 use App\Http\Resources\StudentDetailResource;
 use App\Http\Resources\StudentListItemResource;
 use App\Models\AcademicYear;
+use App\Models\Guardian;
 use App\Models\Student;
 use App\Services\StudentPhotoPathService;
 use App\Services\StudentPhotoService;
@@ -79,6 +81,26 @@ class StudentController extends Controller
     }
 
     /**
+     * Update the guardian profile linked to this student and this student's relationship.
+     */
+    public function updateGuardian(UpdateStudentGuardianRequest $request, Student $student, Guardian $guardian): JsonResponse
+    {
+        try {
+            $updated = $this->studentsService->updateGuardian($student, $guardian, $request->validated());
+        } catch (RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => (new StudentDetailResource($updated))->resolve(),
+        ]);
+    }
+
+    /**
      * Cycles available to the directory. Active cycle first, then newest.
      */
     public function academicYears(): JsonResponse
@@ -127,6 +149,19 @@ class StudentController extends Controller
         return response()->json([
             'success' => true,
             'data' => StudentListItemResource::collection($students)->resolve(),
+        ]);
+    }
+
+    /**
+     * Current photo and archived replacements, grouped later in the UI by cycle.
+     */
+    public function photoHistory(int $studentId, StudentPhotoPathService $photos): JsonResponse
+    {
+        $student = Student::query()->findOrFail($studentId);
+
+        return response()->json([
+            'success' => true,
+            'data' => $photos->historyFor($student),
         ]);
     }
 

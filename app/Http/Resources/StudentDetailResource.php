@@ -2,7 +2,9 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Guardian;
 use App\Services\StudentPhotoPathService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -127,15 +129,33 @@ class StudentDetailResource extends JsonResource
                     'updated_at' => $enrollment->updated_at,
                 ];
             }),
-            'guardians' => $student->guardians->map(function ($guardian) {
-                $p = $guardian->profile;
+            'guardians' => $student->guardians->map(
+                fn ($guardian) => $this->guardianPayload($guardian)
+            ),
+        ];
+    }
 
-                return [
-                    'name' => trim(($p?->first_name ?? '') . ' ' . ($p?->last_name ?? '')),
-                    'relationship' => $guardian->pivot->relationship,
-                    'phone' => $p?->phone_number,
-                ];
-            }),
+    /**
+     * @return array<string, mixed>
+     */
+    private function guardianPayload(Guardian $guardian): array
+    {
+        $profile = $guardian->profile;
+        $birth = $profile?->birth_date ? Carbon::parse($profile->birth_date) : null;
+
+        return [
+            'id' => $guardian->id,
+            'name' => trim(($profile?->first_name ?? '').' '.($profile?->last_name ?? '')),
+            'first_name' => $profile?->first_name,
+            'last_name' => $profile?->last_name,
+            'national_id' => $profile?->national_id,
+            'relationship' => $guardian->pivot->relationship,
+            'email' => $profile?->email,
+            'phone' => $profile?->phone_number,
+            'birth_date' => $birth?->toDateString(),
+            'birth_year' => $birth?->year,
+            'gender' => $profile?->gender,
+            'age' => $birth?->age,
         ];
     }
 

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AcademicYear;
 use App\Models\Student;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
@@ -27,6 +28,8 @@ use Illuminate\Support\Facades\URL;
  */
 class StudentPhotoPathService
 {
+    /** @var Collection<int, AcademicYear>|null */
+    private ?Collection $academicYears = null;
     public function stableCurrentDirectory(int $studentId): string
     {
         return "photos/students/{$studentId}/current";
@@ -40,6 +43,103 @@ class StudentPhotoPathService
     public function stableProfilePictureValue(int $studentId): string
     {
         return "students/{$studentId}/current/profile.jpg";
+    }
+
+    public function isHistoryVersion(string $version): bool
+    {
+        return $version === 'current' || preg_match('/^\d{14}$/', $version) === 1;
+    }
+
+    /**
+     * Current photo plus archived replacements, newest archive first.
+     *
+     * @return list<array{version: string, is_current: bool, replaced_at: string|null, academic_year: string|null, thumb_url: string|null, profile_url: string|null, original_url: string|null}>
+     */
+    public function historyFor(Student $student): array
+    {
+        $items = [];
+
+        if ($this->resolveHistoryPath($student->id, 'current', 'profile')
+            || $this->resolveHistoryPath($student->id, 'current', 'original')) {
+            $items[] = $this->historyItem($student, 'current', $this->lastModifiedAt($student));
+        }
+
+        $stamps = [];
+        $versionsDir = $this->stableVersionsDirectory($student->id);
+        $disk = Storage::disk('private');
+        if ($disk->exists($versionsDir)) {
+            foreach ($disk->directories($versionsDir) as $directory) {
+                $stamp = basename(str_replace('\\', '/', $directory));
+                if (preg_match('/^\d{14}$/', $stamp) === 1) {
+                    $stamps[] = $stamp;
+                }
+            }
+        }
+        rsort($stamps);
+
+        foreach ($stamps as $stamp) {
+            $replacedAt = Carbon::createFromFormat('YmdHis', $stamp) ?: null;
+            $items[] = $this->historyItem($student, $stamp, $replacedAt);
+        }
+
+        return $items;
+    }
+
+    /**
+     * File inside current/ or versions/{YmdHis}/ only. Rejects any other version key.
+     */
+    public function resolveHistoryPath(int $studentId, string $version, string $size): ?string
+    {
+        $dir = $this->historyDirectory($studentId, $version);
+        if ($dir === null) {
+            return null;
+        }
+
+        $size = $this->normalizeSize($size);
+        $disk = Storage::disk('private');
+        $preferred = match ($size) {
+            'thumb' => "{$dir}/thumb.jpg",
+            'original' => null,
+            default => "{$dir}/profile.jpg",
+        };
+
+        if (is_string($preferred) && $disk->exists($preferred)) {
+            return $preferred;
+        }
+
+        if ($size !== 'original') {
+            $profile = "{$dir}/profile.jpg";
+            if ($disk->exists($profile)) {
+                return $profile;
+            }
+        }
+
+        return $this->originalInDirectory($dir);
+    }
+
+    public function signedHistoryUrl(Student $student, string $version, string $size = 'profile', int $minutes = 60): ?string
+    {
+        if (! $this->isHistoryVersion($version)) {
+            return null;
+        }
+
+        if (! $this->resolveHistoryPath($student->id, $version, $size)
+            && ! $this->resolveHistoryPath($student->id, $version, 'original')) {
+            return null;
+        }
+
+        return URL::temporarySignedRoute(
+            'private.image',
+            now()->addMinutes($minutes),
+            [
+                'id' => $student->id,
+                'size' => $this->normalizeSize($size),
+                'version' => $version,
+                'v' => $version === 'current'
+                    ? ($this->lastModifiedAt($student)?->timestamp ?? now()->timestamp)
+                    : $version,
+            ]
+        );
     }
 
     public function isStableProfilePicture(?string $value): bool
@@ -304,5 +404,74 @@ class StudentPhotoPathService
     private function normalizeSize(string $size): string
     {
         return in_array($size, ['thumb', 'profile', 'original'], true) ? $size : 'profile';
+    }
+
+    private function historyDirectory(int $studentId, string $version): ?string
+    {
+        if (! $this->isHistoryVersion($version)) {
+            return null;
+        }
+
+        $base = "photos/students/{$studentId}";
+
+        return $version === 'current'
+            ? "{$base}/current"
+            : "{$base}/versions/{$version}";
+    }
+
+    private function originalInDirectory(string $dir): ?string
+    {
+        $disk = Storage::disk('private');
+        if (! $disk->exists($dir)) {
+            return null;
+        }
+
+        foreach ($disk->files($dir) as $file) {
+            if (preg_match('/^original\.[a-z0-9]+$/i', basename($file)) === 1) {
+                return $file;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{version: string, is_current: bool, replaced_at: string|null, academic_year: string|null, thumb_url: string|null, profile_url: string|null, original_url: string|null}
+     */
+    private function historyItem(Student $student, string $version, ?Carbon $replacedAt): array
+    {
+        return [
+            'version' => $version,
+            'is_current' => $version === 'current',
+            'replaced_at' => $replacedAt?->toIso8601String(),
+            'academic_year' => $this->academicYearLabel($replacedAt),
+            'thumb_url' => $this->signedHistoryUrl($student, $version, 'thumb'),
+            'profile_url' => $this->signedHistoryUrl($student, $version, 'profile'),
+            'original_url' => $this->signedHistoryUrl($student, $version, 'original'),
+        ];
+    }
+
+    private function academicYearLabel(?Carbon $at): ?string
+    {
+        if (! $at) {
+            return null;
+        }
+
+        $this->academicYears ??= AcademicYear::query()->orderByDesc('starts_on')->get();
+        $day = $at->toDateString();
+        $match = $this->academicYears->first(function (AcademicYear $year) use ($day) {
+            if (! $year->starts_on || ! $year->ends_on) {
+                return false;
+            }
+
+            return $year->starts_on->toDateString() <= $day
+                && $year->ends_on->toDateString() >= $day;
+        });
+
+        if (! $match?->year_start || ! $match->year_end) {
+            return null;
+        }
+
+        return $match->year_start.'-'.$match->year_end;
     }
 }

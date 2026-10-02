@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Models\AcademicYear;
 use App\Models\Address;
+use App\Models\Guardian;
 use App\Models\Student;
+use App\Support\Curp;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use RuntimeException;
@@ -69,6 +71,46 @@ class StudentsService
                 $profile->save();
             }
         }
+
+        return $this->findForDetail($student->id);
+    }
+
+    /**
+     * @param  array{first_name: string, last_name: string, national_id?: string|null, relationship: string, email?: string|null, phone?: string|null}  $data
+     */
+    public function updateGuardian(Student $student, Guardian $guardian, array $data): Student
+    {
+        $linked = $student->guardians()->whereKey($guardian->id)->exists();
+        if (! $linked) {
+            throw new RuntimeException('El tutor no está asociado a este alumno.');
+        }
+
+        $guardian->loadMissing('profile');
+        $profile = $guardian->profile;
+        if (! $profile) {
+            throw new RuntimeException('El tutor no tiene perfil asociado.');
+        }
+
+        $curp = Curp::normalize($data['national_id'] ?? null);
+        $derived = $curp === '' ? null : Curp::derive($curp);
+        if ($curp !== '' && $derived === null) {
+            throw new RuntimeException('La CURP del tutor no es válida.');
+        }
+
+        $profile->fill([
+            'first_name' => trim($data['first_name']),
+            'last_name' => trim($data['last_name']),
+            'email' => $data['email'] ?? null,
+            'phone_number' => $data['phone'] ?? null,
+            'national_id' => $curp === '' ? null : $curp,
+            'birth_date' => $derived['birth_date'] ?? null,
+            'gender' => $derived['gender'] ?? null,
+        ]);
+        $profile->save();
+
+        $student->guardians()->updateExistingPivot($guardian->id, [
+            'relationship' => trim($data['relationship']),
+        ]);
 
         return $this->findForDetail($student->id);
     }

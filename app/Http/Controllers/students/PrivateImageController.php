@@ -35,11 +35,26 @@ class PrivateImageController extends Controller
                 $size = 'thumb';
             }
 
-            $path = $this->photoPathService->resolveRelativePath($student, $size);
+            $version = request()->query('version');
+            if (is_string($version) && $version !== '') {
+                if (! $this->photoPathService->isHistoryVersion($version)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'version not found',
+                    ], 404);
+                }
 
-            if (! $path || ! Storage::disk('private')->exists($path)) {
-                // Prefer original when optimized size is missing.
-                $path = $this->photoPathService->resolveRelativePath($student, 'original');
+                $path = $this->photoPathService->resolveHistoryPath((int) $student->id, $version, $size);
+                if (! $path || ! Storage::disk('private')->exists($path)) {
+                    $path = $this->photoPathService->resolveHistoryPath((int) $student->id, $version, 'original');
+                }
+            } else {
+                $path = $this->photoPathService->resolveRelativePath($student, $size);
+
+                if (! $path || ! Storage::disk('private')->exists($path)) {
+                    // Prefer original when optimized size is missing.
+                    $path = $this->photoPathService->resolveRelativePath($student, 'original');
+                }
             }
 
             if (! $path || ! Storage::disk('private')->exists($path)) {

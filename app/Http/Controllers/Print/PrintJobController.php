@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Print;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\ServiceAbility;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Print\Concerns\LogsPrintActions;
 use App\Http\Requests\Print\StorePrintJobsRequest;
 use App\Models\PrintJob;
 use App\Models\User;
@@ -14,10 +15,13 @@ use App\Services\Print\StudentCardRenderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class PrintJobController extends Controller
 {
+    use LogsPrintActions;
+
     public function __construct(
         private readonly PrintJobService $printJobs,
         private readonly StudentCardRenderService $renderer,
@@ -37,6 +41,15 @@ class PrintJobController extends Controller
                 $data['template_key'] ?? 'student-card-v1'
             );
         } catch (\Throwable $e) {
+            Log::warning('[print] preview falló', [
+                'user_id' => $request->user()?->id,
+                'student_id' => (int) $data['student_id'],
+                'template_key' => $data['template_key'] ?? 'student-card-v1',
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile().':'.$e->getLine(),
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage(),
@@ -114,12 +127,28 @@ class PrintJobController extends Controller
             ]);
         }
 
-        $batch = $this->credentialPrints->createBatch(
-            $data['student_ids'],
-            $request->user(),
-            $data['template_key'] ?? 'student-card-v1',
-            PrintBatchStrategy::FrontsThenBacks,
-            $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID
+        $templateKey = $data['template_key'] ?? 'student-card-v1';
+        $printerId = $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID;
+
+        $batch = $this->logPrintAction(
+            'encolar trabajos',
+            [
+                'printer_id' => $printerId,
+                'template_key' => $templateKey,
+                'student_ids' => $data['student_ids'],
+            ],
+            fn () => $this->credentialPrints->createBatch(
+                $data['student_ids'],
+                $request->user(),
+                $templateKey,
+                PrintBatchStrategy::FrontsThenBacks,
+                $printerId
+            ),
+            fn (array $batch) => [
+                'batch_uuid' => $batch['batch_uuid'],
+                'cards' => $batch['cards']->count(),
+                'skipped' => count($batch['skipped'] ?? []),
+            ]
         );
 
         $jobs = $batch['cards']
@@ -166,7 +195,15 @@ class PrintJobController extends Controller
     public function cancelQueue(Request $request): JsonResponse
     {
         $printerId = (string) $request->input('printer_id', PrintJobService::DEFAULT_PRINTER_ID);
-        $jobs = $this->printJobs->cancelQueue($printerId, $request->user());
+        $jobs = $this->logPrintAction(
+            'cancelar cola',
+            ['printer_id' => $printerId],
+            fn () => $this->printJobs->cancelQueue($printerId, $request->user()),
+            fn (array $jobs) => [
+                'cancelled' => count($jobs),
+                'print_job_uuids' => collect($jobs)->pluck('uuid')->values()->all(),
+            ]
+        );
 
         return response()->json([
             'success' => true,
@@ -177,7 +214,12 @@ class PrintJobController extends Controller
     public function resume(Request $request): JsonResponse
     {
         $printerId = (string) $request->input('printer_id', PrintJobService::DEFAULT_PRINTER_ID);
-        $jobs = $this->printJobs->resumeQueue($printerId);
+        $jobs = $this->logPrintAction(
+            'reanudar cola',
+            ['printer_id' => $printerId],
+            fn () => $this->printJobs->resumeQueue($printerId),
+            fn (array $jobs) => ['jobs' => count($jobs)]
+        );
 
         return response()->json([
             'success' => true,
@@ -193,9 +235,18 @@ class PrintJobController extends Controller
         ]);
     }
 
-    public function cancel(PrintJob $printJob): JsonResponse
+    public function cancel(Request $request, PrintJob $printJob): JsonResponse
     {
-        $job = $this->printJobs->cancel($printJob, $request->user());
+        $job = $this->logPrintAction(
+            'cancelar trabajo',
+            [
+                'print_job_id' => $printJob->id,
+                'print_job_uuid' => $printJob->uuid,
+                'student_id' => $printJob->student_id,
+                'status' => $printJob->status?->value,
+            ],
+            fn () => $this->printJobs->cancel($printJob, $request->user())
+        );
 
         return response()->json([
             'success' => true,

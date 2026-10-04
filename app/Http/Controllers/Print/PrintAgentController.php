@@ -4,16 +4,20 @@ namespace App\Http\Controllers\Print;
 
 use App\Enums\PrintJobStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Print\Concerns\LogsPrintActions;
 use App\Models\PrintJob;
 use App\Services\Print\CardTemplateService;
 use App\Services\Print\PrintJobService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PrintAgentController extends Controller
 {
+    use LogsPrintActions;
+
     public function __construct(
         private readonly PrintJobService $printJobs,
         private readonly CardTemplateService $templates
@@ -94,16 +98,29 @@ class PrintAgentController extends Controller
             'agent_id' => ['required', 'string', 'max:128'],
         ]);
 
+        $context = [
+            'print_job_id' => $printJob->id,
+            'print_job_uuid' => $printJob->uuid,
+            'printer_id' => $printJob->printer_id,
+            'agent_id' => $request->input('agent_id'),
+        ];
+
         if ($printJob->claimed_by && $printJob->claimed_by !== $request->input('agent_id')) {
+            Log::warning('[print] completar trabajo rechazado: tomado por otro agente', $context + [
+                'claimed_by' => $printJob->claimed_by,
+            ]);
+
             return response()->json(['success' => false, 'message' => 'Job claimed by another agent.'], 409);
         }
 
-        if ($printJob->status === PrintJobStatus::Claimed) {
-            $this->printJobs->markPrinting($printJob);
-            $printJob = $printJob->fresh();
-        }
+        $job = $this->logPrintAction('completar trabajo', $context, function () use ($printJob) {
+            if ($printJob->status === PrintJobStatus::Claimed) {
+                $this->printJobs->markPrinting($printJob);
+                $printJob = $printJob->fresh();
+            }
 
-        $job = $this->printJobs->markCompleted($printJob);
+            return $this->printJobs->markCompleted($printJob);
+        });
 
         return response()->json([
             'success' => true,
@@ -118,11 +135,28 @@ class PrintAgentController extends Controller
             'error' => ['required', 'string', 'max:2000'],
         ]);
 
+        $context = [
+            'print_job_id' => $printJob->id,
+            'print_job_uuid' => $printJob->uuid,
+            'printer_id' => $printJob->printer_id,
+            'agent_id' => $data['agent_id'],
+            'printer_error' => $data['error'],
+        ];
+
         if ($printJob->claimed_by && $printJob->claimed_by !== $data['agent_id']) {
+            Log::warning('[print] reporte de fallo rechazado: tomado por otro agente', $context + [
+                'claimed_by' => $printJob->claimed_by,
+            ]);
+
             return response()->json(['success' => false, 'message' => 'Job claimed by another agent.'], 409);
         }
 
-        $job = $this->printJobs->markFailed($printJob, $data['error']);
+        $job = $this->logPrintAction(
+            'registrar fallo de impresora',
+            $context,
+            fn () => $this->printJobs->markFailed($printJob, $data['error']),
+            fn (PrintJob $job) => ['status' => $job->status->value]
+        );
 
         return response()->json([
             'success' => true,

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Print;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\PrintJobStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Print\Concerns\LogsPrintActions;
 use App\Http\Requests\Print\DiscardCredentialPrintsRequest;
 use App\Http\Requests\Print\EnqueueCredentialPrintsRequest;
 use App\Http\Requests\Print\MarkCredentialPrintSideRequest;
@@ -19,6 +20,8 @@ use Illuminate\Validation\ValidationException;
 
 class CredentialPrintController extends Controller
 {
+    use LogsPrintActions;
+
     public function __construct(
         private readonly CredentialPrintService $cards
     ) {}
@@ -29,12 +32,29 @@ class CredentialPrintController extends Controller
         $strategy = PrintBatchStrategy::tryFrom((string) ($data['strategy'] ?? ''))
             ?? PrintBatchStrategy::FrontsThenBacks;
 
-        $batch = $this->cards->createBatch(
-            $data['student_ids'],
-            $request->user(),
-            $data['template_key'] ?? 'student-card-v1',
-            $strategy,
-            $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID
+        $templateKey = $data['template_key'] ?? 'student-card-v1';
+        $printerId = $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID;
+
+        $batch = $this->logPrintAction(
+            'crear lote de credenciales',
+            [
+                'printer_id' => $printerId,
+                'template_key' => $templateKey,
+                'strategy' => $strategy->value,
+                'student_ids' => $data['student_ids'],
+            ],
+            fn () => $this->cards->createBatch(
+                $data['student_ids'],
+                $request->user(),
+                $templateKey,
+                $strategy,
+                $printerId
+            ),
+            fn (array $batch) => [
+                'batch_uuid' => $batch['batch_uuid'],
+                'cards' => $batch['cards']->count(),
+                'skipped' => count($batch['skipped'] ?? []),
+            ]
         );
 
         return response()->json([
@@ -114,11 +134,25 @@ class CredentialPrintController extends Controller
     public function enqueue(EnqueueCredentialPrintsRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $jobs = $this->cards->enqueue(
-            $data['credential_print_ids'],
-            $data['side'],
-            $request->user(),
-            $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID
+        $printerId = $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID;
+
+        $jobs = $this->logPrintAction(
+            'encolar credenciales',
+            [
+                'printer_id' => $printerId,
+                'side' => $data['side'],
+                'credential_print_ids' => $data['credential_print_ids'],
+            ],
+            fn () => $this->cards->enqueue(
+                $data['credential_print_ids'],
+                $data['side'],
+                $request->user(),
+                $printerId
+            ),
+            fn ($jobs) => [
+                'jobs' => $jobs->count(),
+                'print_job_uuids' => $jobs->pluck('uuid')->values()->all(),
+            ]
         );
 
         return response()->json([
@@ -135,11 +169,22 @@ class CredentialPrintController extends Controller
     public function discard(DiscardCredentialPrintsRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $cards = $this->cards->discard(
-            $request->user(),
-            $data['credential_print_ids'] ?? null,
-            $data['batch_uuid'] ?? null,
-            $data['reason'] ?? 'Descartado por el operador'
+        $reason = $data['reason'] ?? 'Descartado por el operador';
+
+        $cards = $this->logPrintAction(
+            'descartar credenciales',
+            [
+                'credential_print_ids' => $data['credential_print_ids'] ?? null,
+                'batch_uuid' => $data['batch_uuid'] ?? null,
+                'reason' => $reason,
+            ],
+            fn () => $this->cards->discard(
+                $request->user(),
+                $data['credential_print_ids'] ?? null,
+                $data['batch_uuid'] ?? null,
+                $reason
+            ),
+            fn ($cards) => ['discarded' => $cards->count()]
         );
 
         return response()->json([
@@ -151,10 +196,17 @@ class CredentialPrintController extends Controller
     public function markSide(MarkCredentialPrintSideRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $card = $this->cards->markSide(
-            (int) $data['credential_print_id'],
-            $data['side'],
-            $request->user()
+        $card = $this->logPrintAction(
+            'marcar lado de credencial',
+            [
+                'credential_print_id' => (int) $data['credential_print_id'],
+                'side' => $data['side'],
+            ],
+            fn () => $this->cards->markSide(
+                (int) $data['credential_print_id'],
+                $data['side'],
+                $request->user()
+            )
         );
 
         return response()->json([

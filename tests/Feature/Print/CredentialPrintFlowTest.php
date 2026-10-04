@@ -249,6 +249,20 @@ class CredentialPrintFlowTest extends TestCase
         $this->assertSame(CredentialSideStatus::Cancelled, $card->back_status);
     }
 
+    public function test_http_cancel_job_endpoint_records_the_user(): void
+    {
+        $ana = $this->makeStudent('ANA140108MOCRRNB1', 'Ana', 'HttpCancel');
+        $this->enroll($ana);
+        app(CredentialPrintService::class)->createBatch([$ana->id], $this->user, $this->design->uuid);
+        $job = PrintJob::query()->first();
+
+        $this->postJson("/api/print-jobs/{$job->uuid}/cancel")
+            ->assertOk()
+            ->assertJsonPath('data.status', PrintJobStatus::Cancelled->value);
+
+        $this->assertSame($this->user->id, $job->fresh()->cancelled_by);
+    }
+
     public function test_http_create_batch_and_pending_endpoints(): void
     {
         $ana = $this->makeStudent('ANA140105MOCRRNA7', 'Ana', 'Http');

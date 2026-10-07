@@ -41,7 +41,13 @@ use App\Http\Controllers\Print\CredentialPrintController;
 use App\Http\Controllers\Print\PrintAgentController;
 use App\Http\Controllers\Print\PrintJobController;
 use App\Http\Controllers\Print\Zc300AgentDownloadController;
+use App\Http\Controllers\People\PersonPhotoFileController;
+use App\Http\Controllers\Staff\StaffController;
+use App\Http\Controllers\Staff\StaffPhotoController;
 use App\Http\Controllers\students\GradeLevelController;
+use App\Http\Controllers\Teachers\TeacherClassController;
+use App\Http\Controllers\Teachers\TeacherController;
+use App\Http\Controllers\Teachers\TeacherPhotoController;
 use App\Http\Controllers\students\PrivateImageController;
 use App\Http\Controllers\TelegramController;
 use App\Http\Controllers\UserController;
@@ -598,9 +604,64 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
         ->middleware('permission:manage student photos');
 });
 
+Route::prefix('teachers')->middleware('auth:sanctum', 'verified')->group(function () {
+    Route::get('/', [TeacherController::class, 'index'])
+        ->middleware('permission:view teachers');
+    Route::post('/', [TeacherController::class, 'store'])
+        ->middleware('permission:create teachers');
+    Route::get('/classes/options', [TeacherClassController::class, 'options'])
+        ->middleware('permission:view teachers|edit teachers');
+    Route::get('/{teacher}', [TeacherController::class, 'show'])
+        ->whereNumber('teacher')
+        ->middleware('permission:view teachers');
+    Route::patch('/{teacher}', [TeacherController::class, 'update'])
+        ->whereNumber('teacher')
+        ->middleware('permission:edit teachers');
+    Route::patch('/{teacher}/status', [TeacherController::class, 'status'])
+        ->whereNumber('teacher')
+        ->middleware('permission:delete teachers');
+    Route::put('/{teacher}/classes', [TeacherClassController::class, 'sync'])
+        ->whereNumber('teacher')
+        ->middleware('permission:edit teachers');
+    Route::get('/{teacher}/photo-history', [TeacherPhotoController::class, 'history'])
+        ->whereNumber('teacher')
+        ->middleware('permission:view teachers');
+    Route::post('/{teacher}/photo', [TeacherPhotoController::class, 'upload'])
+        ->whereNumber('teacher')
+        ->middleware('permission:edit teachers');
+});
+
+Route::prefix('staff')->middleware('auth:sanctum', 'verified')->group(function () {
+    Route::get('/', [StaffController::class, 'index'])
+        ->middleware('permission:view staff');
+    Route::post('/', [StaffController::class, 'store'])
+        ->middleware('permission:create staff');
+    Route::get('/{staff}', [StaffController::class, 'show'])
+        ->whereNumber('staff')
+        ->middleware('permission:view staff');
+    Route::patch('/{staff}', [StaffController::class, 'update'])
+        ->whereNumber('staff')
+        ->middleware('permission:edit staff');
+    Route::patch('/{staff}/status', [StaffController::class, 'status'])
+        ->whereNumber('staff')
+        ->middleware('permission:delete staff');
+    Route::get('/{staff}/photo-history', [StaffPhotoController::class, 'history'])
+        ->whereNumber('staff')
+        ->middleware('permission:view staff');
+    Route::post('/{staff}/photo', [StaffPhotoController::class, 'upload'])
+        ->whereNumber('staff')
+        ->middleware('permission:edit staff');
+});
+
 Route::get('/private-image/{id}', [PrivateImageController::class, 'showById'])
     ->whereNumber('id')
     ->middleware('signed')
     ->name('private.image');
+
+Route::get('/private-image/{kind}/{id}', [PersonPhotoFileController::class, 'show'])
+    ->whereIn('kind', ['teachers', 'staff'])
+    ->whereNumber('id')
+    ->middleware('signed')
+    ->name('private.person-image');
 
 require __DIR__.'/service.php';

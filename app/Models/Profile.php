@@ -71,6 +71,11 @@ protected $fillable = [
         return $this->hasOne(Guardian::class);
     }
 
+    public function staff(): HasOne
+    {
+        return $this->hasOne(Staff::class);
+    }
+
     public function address(): BelongsTo
     {
         return $this->belongsTo(Address::class);

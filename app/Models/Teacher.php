@@ -13,9 +13,10 @@ class Teacher extends Model
 {
     /** @use HasFactory<\Database\Factories\TeacherFactory> */
     use HasFactory;
-protected $fillable = [
+    protected $fillable = [
         'profile_id',
         'employee',
+        'classroom',
         'status',
     ];
 

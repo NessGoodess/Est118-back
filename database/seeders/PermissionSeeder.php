@@ -28,6 +28,18 @@ class PermissionSeeder extends Seeder
             'create students',
             'edit students',
             'delete students',
+
+            // Teachers
+            'view teachers',
+            'create teachers',
+            'edit teachers',
+            'delete teachers',
+
+            // Staff
+            'view staff',
+            'create staff',
+            'edit staff',
+            'delete staff',
             'view student photos',
             'manage student photos',
 

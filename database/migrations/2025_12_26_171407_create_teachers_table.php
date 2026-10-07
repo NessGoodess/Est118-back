@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('teachers', function (Blueprint $table) {
             $table->id();
             $table->foreignId('profile_id')->constrained('profiles')->cascadeOnDelete();
-            $table->string('employee')->nullable();
+            $table->string('employee')->nullable(); //
             $table->string('classroom')->nullable();
             $table->string('status')->default('active');
             $table->timestamps();

@@ -9,6 +9,8 @@ use App\Models\ClassGroup;
 use App\Models\Enrollment;
 use App\Models\GradeLevel;
 use App\Models\PreEnrollment;
+use App\Models\Profile;
+use App\Models\Student;
 use App\Models\User;
 use App\Models\Workshop;
 use App\Models\WorkshopEnrollment;
@@ -62,6 +64,55 @@ class NewIntakeServiceTest extends TestCase
 
         $this->postJson('/api/new-intakes', $this->payload($second->id, $group->id, $workshop->id))
             ->assertStatus(422);
+    }
+
+    public function test_student_contact_and_guardian_curp_are_optional(): void
+    {
+        $year = AcademicYear::factory()->create([
+            'is_active' => true,
+            'year_start' => '2026',
+            'year_end' => '2027',
+        ]);
+        $second = GradeLevel::query()->create(['name' => '2°']);
+        GradeLevel::query()->create(['name' => '1°']);
+        $group = ClassGroup::query()->create([
+            'academic_year_id' => $year->id,
+            'grade_level_id' => $second->id,
+            'name' => 'C',
+        ]);
+        $workshop = Workshop::query()->create([
+            'code' => 'INFORMATICA',
+            'name' => 'Informática',
+            'is_active' => true,
+        ]);
+        $user = User::factory()->create();
+        Permission::findOrCreate('edit students', 'web');
+        $user->givePermissionTo('edit students');
+        Sanctum::actingAs($user);
+
+        $existing = Profile::query()->create([
+            'national_id' => null,
+            'first_name' => 'OTRA',
+            'last_name' => 'PERSONA',
+        ]);
+
+        $payload = [
+            ...$this->payload($second->id, $group->id, $workshop->id),
+            'phone' => null,
+            'email' => null,
+            'guardian_curp' => null,
+        ];
+        $response = $this->postJson('/api/new-intakes', $payload);
+
+        $response->assertCreated();
+        $student = Student::query()->with(['profile', 'guardians.profile'])->find($response->json('data.student_id'));
+        $this->assertNull($student->profile->email);
+        $this->assertNull($student->profile->phone_number);
+        $guardianProfile = $student->guardians->first()?->profile;
+        $this->assertNotNull($guardianProfile);
+        $this->assertNull($guardianProfile->national_id);
+        $this->assertNotSame($existing->id, $guardianProfile->id);
+        $this->assertSame('rosa@example.com', $guardianProfile->email);
     }
 
     /**

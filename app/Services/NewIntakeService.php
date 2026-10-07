@@ -102,8 +102,8 @@ class NewIntakeService
         }
 
         $curp = strtoupper(trim((string) $data['curp']));
-        $guardianCurp = strtoupper(trim((string) $data['guardian_curp']));
-        if ($curp === $guardianCurp) {
+        $guardianCurp = strtoupper(trim((string) ($data['guardian_curp'] ?? '')));
+        if ($guardianCurp !== '' && $curp === $guardianCurp) {
             throw new RuntimeException('La CURP del tutor debe ser distinta a la del alumno.');
         }
         if (Profile::query()->where('national_id', $curp)->exists()) {
@@ -130,8 +130,8 @@ class NewIntakeService
                 'last_name' => $lastName,
                 'birth_date' => $data['birth_date'],
                 'gender' => $data['gender'],
-                'email' => $data['email'] ?: null,
-                'phone_number' => $data['phone'],
+                'email' => ($data['email'] ?? null) ?: null,
+                'phone_number' => ($data['phone'] ?? null) ?: null,
                 'address_id' => $address->id,
             ]);
 
@@ -145,16 +145,18 @@ class NewIntakeService
             $this->linkSiblings($student, $data['sibling_ids'] ?? []);
 
             $guardianLast = trim($data['guardian_last_name'].' '.($data['guardian_second_last_name'] ?? ''));
-            $guardianProfile = Profile::query()->firstOrCreate(
-                ['national_id' => $guardianCurp],
-                [
-                    'first_name' => $data['guardian_first_name'],
-                    'last_name' => $guardianLast,
-                    'gender' => 'O',
-                    'phone_number' => $data['guardian_phone'],
-                    'email' => $data['contact_email'],
-                ]
-            );
+            $guardianAttributes = [
+                'first_name' => $data['guardian_first_name'],
+                'last_name' => $guardianLast,
+                'birth_date' => $data['guardian_birth_date'] ?? null,
+                'gender' => $data['guardian_gender'] ?? 'O',
+                'phone_number' => $data['guardian_phone'],
+                'email' => $data['contact_email'],
+            ];
+            // Without a CURP there is no safe key to match an existing person, so it is always a new profile.
+            $guardianProfile = $guardianCurp !== ''
+                ? Profile::query()->firstOrCreate(['national_id' => $guardianCurp], $guardianAttributes)
+                : Profile::query()->create([...$guardianAttributes, 'national_id' => null]);
             $guardian = Guardian::query()->firstOrCreate(
                 ['profile_id' => $guardianProfile->id],
                 ['Kinship' => $data['guardian_relationship']]

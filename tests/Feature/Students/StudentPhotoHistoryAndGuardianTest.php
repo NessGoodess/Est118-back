@@ -155,6 +155,27 @@ class StudentPhotoHistoryAndGuardianTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('national_id');
     }
 
+    public function test_guardian_update_allows_empty_curp_and_relationship(): void
+    {
+        Sanctum::actingAs($this->userWith('edit students', 'view students'));
+
+        $student = $this->student('Ana', 'López');
+        $guardian = $this->guardian('Rosa', 'López');
+        $student->guardians()->attach($guardian->id, ['relationship' => 'Madre']);
+
+        $saved = $this->patchJson("/api/students/{$student->id}/guardians/{$guardian->id}", [
+            'first_name' => 'Rosa',
+            'last_name' => 'López',
+            'national_id' => '',
+            'relationship' => '',
+            'email' => '',
+            'phone' => '',
+        ])->assertOk()->json('data.guardians.0');
+
+        $this->assertNull($saved['national_id']);
+        $this->assertNull($saved['relationship']);
+    }
+
     private function student(string $firstName, string $lastName): Student
     {
         $profile = Profile::query()->create([

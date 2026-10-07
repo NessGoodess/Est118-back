@@ -76,7 +76,7 @@ class StudentsService
     }
 
     /**
-     * @param  array{first_name: string, last_name: string, national_id?: string|null, relationship: string, email?: string|null, phone?: string|null}  $data
+     * @param  array{first_name: string, last_name: string, national_id?: string|null, relationship?: string|null, email?: string|null, phone?: string|null}  $data
      */
     public function updateGuardian(Student $student, Guardian $guardian, array $data): Student
     {
@@ -108,8 +108,9 @@ class StudentsService
         ]);
         $profile->save();
 
+        $relationship = trim((string) ($data['relationship'] ?? ''));
         $student->guardians()->updateExistingPivot($guardian->id, [
-            'relationship' => trim($data['relationship']),
+            'relationship' => $relationship === '' ? null : $relationship,
         ]);
 
         return $this->findForDetail($student->id);

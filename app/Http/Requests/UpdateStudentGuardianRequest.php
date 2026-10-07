@@ -44,7 +44,7 @@ class UpdateStudentGuardianRequest extends FormRequest
                 'regex:'.Curp::PATTERN,
                 Rule::unique('profiles', 'national_id')->ignore($profileId),
             ],
-            'relationship' => ['required', 'string', 'min:2', 'max:50'],
+            'relationship' => ['nullable', 'string', 'max:50'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:30'],
         ];

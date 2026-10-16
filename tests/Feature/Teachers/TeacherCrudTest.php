@@ -22,12 +22,17 @@ class TeacherCrudTest extends TestCase
         $response->assertCreated();
         $id = $response->json('data.id');
         $this->assertNotNull($id);
-        $this->assertSame('VILLANUEVA MARTINEZ', Teacher::query()->find($id)?->profile?->last_name);
+        $profile = Teacher::query()->find($id)?->profile;
+        $this->assertSame('VILLANUEVA', $profile?->last_name);
+        $this->assertSame('MARTINEZ', $profile?->second_last_name);
+        $this->assertSame('ARACELI VILLANUEVA MARTINEZ', $profile?->fullName());
         $this->assertSame('16', Teacher::query()->find($id)?->classroom);
 
         $this->getJson("/api/teachers/{$id}")
             ->assertOk()
             ->assertJsonPath('data.personal.first_name', 'ARACELI')
+            ->assertJsonPath('data.personal.last_name', 'VILLANUEVA')
+            ->assertJsonPath('data.personal.second_last_name', 'MARTINEZ')
             ->assertJsonPath('data.address.city', 'Oaxaca de Juárez')
             ->assertJsonPath('data.job.employee', 'A-001');
 
@@ -45,6 +50,35 @@ class TeacherCrudTest extends TestCase
         $this->getJson('/api/teachers?status=inactive')
             ->assertOk()
             ->assertJsonCount(1, 'data');
+    }
+
+    public function test_compound_surnames_round_trip(): void
+    {
+        $this->actingTeacherAdmin();
+        $id = $this->postJson('/api/teachers', [
+            ...$this->payload(),
+            'last_name' => 'DE LA TORRE',
+            'second_last_name' => 'GONZALEZ',
+        ])->assertCreated()->json('data.id');
+
+        $this->getJson("/api/teachers/{$id}")
+            ->assertOk()
+            ->assertJsonPath('data.personal.last_name', 'DE LA TORRE')
+            ->assertJsonPath('data.personal.second_last_name', 'GONZALEZ');
+
+        $this->getJson('/api/teachers')
+            ->assertOk()
+            ->assertJsonPath('data.0.last_name', 'DE LA TORRE GONZALEZ');
+
+        $this->patchJson("/api/teachers/{$id}", [
+            'personal' => [
+                ...$this->personFields(),
+                'last_name' => 'PEREZ',
+                'second_last_name' => 'DE LOS ANGELES',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.personal.last_name', 'PEREZ')
+            ->assertJsonPath('data.personal.second_last_name', 'DE LOS ANGELES');
     }
 
     public function test_duplicate_curp_is_rejected(): void

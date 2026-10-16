@@ -32,7 +32,8 @@ class CredentialPrintController extends Controller
         $strategy = PrintBatchStrategy::tryFrom((string) ($data['strategy'] ?? ''))
             ?? PrintBatchStrategy::FrontsThenBacks;
 
-        $templateKey = $data['template_key'] ?? 'student-card-v1';
+        // Without a key each student gets their grade's default design (mixed print lists).
+        $templateKey = $data['template_key'] ?? null;
         $printerId = $data['printer_id'] ?? PrintJobService::DEFAULT_PRINTER_ID;
 
         $batch = $this->logPrintAction(
@@ -158,7 +159,8 @@ class CredentialPrintController extends Controller
         return response()->json([
             'success' => true,
             'data' => $jobs->map(fn (PrintJob $job) => self::serializeJob($job->loadMissing([
-                'student.profile:id,first_name,last_name',
+                'student.profile:id,first_name,last_name,second_last_name',
+                'profile:id,first_name,last_name,second_last_name',
                 'creator:id,name',
                 'canceller:id,name',
                 'credentialPrint',
@@ -273,16 +275,15 @@ class CredentialPrintController extends Controller
      */
     public function serializeCard(CredentialPrint $card): array
     {
-        $profile = $card->student?->profile;
         $active = $card->activeJob();
 
         return [
             'id' => $card->id,
             'uuid' => $card->uuid,
             'student_id' => $card->student_id,
-            'student_name' => $profile
-                ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
-                : null,
+            'profile_id' => $card->profile_id,
+            'kind' => $card->kindValue(),
+            'student_name' => $card->holderName(),
             'academic_year_id' => $card->academic_year_id,
             'card_design_id' => $card->card_design_id,
             'design_key' => $card->cardDesign?->uuid,
@@ -326,15 +327,13 @@ class CredentialPrintController extends Controller
      */
     public static function serializeJob(PrintJob $job): array
     {
-        $profile = $job->student?->profile;
-
         return [
             'id' => $job->id,
             'uuid' => $job->uuid,
             'student_id' => $job->student_id,
-            'student_name' => $profile
-                ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
-                : null,
+            'profile_id' => $job->profile_id,
+            'kind' => $job->kindValue(),
+            'student_name' => $job->holderName(),
             'credential_print_uuid' => $job->credentialPrint?->uuid,
             'printer_id' => $job->printer_id,
             'template_key' => $job->template_key,

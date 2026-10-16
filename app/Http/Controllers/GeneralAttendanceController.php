@@ -89,7 +89,7 @@ class GeneralAttendanceController extends Controller
                 ->where('source', AttendanceSource::NFC)
                 ->with([
                     'student:id,credential_id,profile_id',
-                    'student.profile:id,first_name,last_name,profile_picture,gender,updated_at',
+                    'student.profile:id,first_name,last_name,second_last_name,profile_picture,gender,updated_at',
                     'student.currentGroup.gradeLevel:id,name',
                     'student.currentGroup',
                 ])
@@ -116,7 +116,7 @@ class GeneralAttendanceController extends Controller
                 ->where('source', AttendanceSource::NFC)
                 ->with([
                     'student:id,credential_id,profile_id',
-                    'student.profile:id,first_name,last_name,profile_picture,gender,updated_at',
+                    'student.profile:id,first_name,last_name,second_last_name,profile_picture,gender,updated_at',
                     'student.currentGroup.gradeLevel:id,name',
                     'student.currentGroup',
                 ])
@@ -148,7 +148,7 @@ class GeneralAttendanceController extends Controller
                 ->whereDate('read_at', $date)
                 ->with([
                     'student:id,credential_id,profile_id',
-                    'student.profile:id,first_name,last_name,profile_picture,gender,updated_at',
+                    'student.profile:id,first_name,last_name,second_last_name,profile_picture,gender,updated_at',
                     'student.currentGroup.gradeLevel:id,name',
                     'student.currentGroup',
                 ])

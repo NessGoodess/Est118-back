@@ -109,7 +109,7 @@ class CredentialPrintingService
         $profile = $student->profile;
         $grade = $classGroup->gradeLevel?->name ?? '';
         $group = $classGroup->name;
-        $fullName = trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''));
+        $fullName = $profile->fullName();
 
         $workshopRow = $student->workshopEnrollmentForYear((int) $classGroup->academic_year_id);
         $workshopNames = ($workshopRow && $workshopRow->status === WorkshopEnrollmentStatus::Assigned)
@@ -119,9 +119,7 @@ class CredentialPrintingService
         $addressStr = $this->formatAddress($profile->address);
         $guardian = $student->guardians->first();
         $gProfile = $guardian?->profile;
-        $tutorName = $gProfile
-            ? trim(($gProfile->first_name ?? '').' '.($gProfile->last_name ?? ''))
-            : '';
+        $tutorName = $gProfile?->fullName() ?? '';
         $phone = $gProfile?->phone_number ?: ($profile->phone_number ?? '');
 
         $photo = $this->photoMeta($student, $classGroup);
@@ -162,7 +160,7 @@ class CredentialPrintingService
             'credential_id' => $student->credential_id,
             'full_name' => $fullName,
             'name' => trim($profile->first_name ?? ''),
-            'last_name' => trim($profile->last_name ?? ''),
+            'last_name' => $profile->fullLastName(),
             'grade' => $grade,
             'group' => $group,
             'workshop_names' => $workshopNames,
@@ -272,7 +270,7 @@ class CredentialPrintingService
             if (! $rel || ! $disk->exists($rel)) {
                 continue;
             }
-            $fullName = trim(($student->profile->first_name ?? '').' '.($student->profile->last_name ?? ''));
+            $fullName = $student->profile->fullName();
             $entry = $this->photoExportFilename($student, $fullName, $rel);
             $zip->addFile($disk->path($rel), 'fotos/'.$entry);
             $added[] = $entry;
@@ -318,7 +316,7 @@ class CredentialPrintingService
         if ($rel && Storage::disk('private')->exists($rel)) {
             $takenAt = Carbon::createFromTimestamp(Storage::disk('private')->lastModified($rel));
         }
-        $fullName = trim(($student->profile?->first_name ?? '').' '.($student->profile?->last_name ?? ''));
+        $fullName = $student->profile?->fullName() ?? '';
 
         return [
             'has_photo' => $hasPhoto,

@@ -38,6 +38,10 @@ use App\Http\Controllers\StudentController;
 use App\Http\Controllers\StudentCredentialPrintingController;
 use App\Http\Controllers\Print\CardTemplateController;
 use App\Http\Controllers\Print\CredentialPrintController;
+use App\Http\Controllers\Print\CredentialReprintRequestController;
+use App\Http\Controllers\Print\CredentialSheetController;
+use App\Http\Controllers\Guardians\GuardianPhotoController;
+use App\Http\Controllers\Print\PersonCredentialPrintController;
 use App\Http\Controllers\Print\PrintAgentController;
 use App\Http\Controllers\Print\PrintJobController;
 use App\Http\Controllers\Print\Zc300AgentDownloadController;
@@ -207,6 +211,29 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('permission:edit students');
     Route::post('/credential-prints/mark-side', [CredentialPrintController::class, 'markSide'])
         ->middleware('permission:edit students');
+    Route::get('/credential-prints/people', [PersonCredentialPrintController::class, 'index'])
+        ->middleware('permission:print credentials');
+    Route::post('/credential-prints/people', [PersonCredentialPrintController::class, 'store'])
+        ->middleware('permission:print credentials');
+    Route::post('/credential-sheets/render', [CredentialSheetController::class, 'render'])
+        ->middleware('permission:view students|print credentials');
+
+    Route::prefix('credential-reprint-requests')->group(function () {
+        $viewers = 'permission:request credential reprints|approve credential reprints|register credential payments|edit students';
+        Route::get('/', [CredentialReprintRequestController::class, 'index'])->middleware($viewers);
+        Route::get('/summary', [CredentialReprintRequestController::class, 'summary'])->middleware($viewers);
+        Route::get('/students', [CredentialReprintRequestController::class, 'students'])->middleware($viewers);
+        Route::post('/', [CredentialReprintRequestController::class, 'store'])
+            ->middleware('permission:request credential reprints|approve credential reprints|edit students');
+        Route::post('/{reprintRequest}/approve', [CredentialReprintRequestController::class, 'approve'])
+            ->middleware('permission:approve credential reprints');
+        Route::post('/{reprintRequest}/reject', [CredentialReprintRequestController::class, 'reject'])
+            ->middleware('permission:approve credential reprints');
+        Route::post('/{reprintRequest}/payment', [CredentialReprintRequestController::class, 'registerPayment'])
+            ->middleware('permission:register credential payments');
+        Route::post('/{reprintRequest}/cancel', [CredentialReprintRequestController::class, 'cancel'])
+            ->middleware('permission:request credential reprints|approve credential reprints');
+    });
 
     Route::get('/card-templates', [CardTemplateController::class, 'index'])
         ->middleware('permission:view students');
@@ -653,13 +680,22 @@ Route::prefix('staff')->middleware('auth:sanctum', 'verified')->group(function (
         ->middleware('permission:edit staff');
 });
 
+Route::prefix('guardians')->middleware('auth:sanctum', 'verified')->group(function () {
+    Route::get('/{guardian}/photo-history', [GuardianPhotoController::class, 'history'])
+        ->whereNumber('guardian')
+        ->middleware('permission:view students');
+    Route::post('/{guardian}/photo', [GuardianPhotoController::class, 'upload'])
+        ->whereNumber('guardian')
+        ->middleware('permission:edit students');
+});
+
 Route::get('/private-image/{id}', [PrivateImageController::class, 'showById'])
     ->whereNumber('id')
     ->middleware('signed')
     ->name('private.image');
 
 Route::get('/private-image/{kind}/{id}', [PersonPhotoFileController::class, 'show'])
-    ->whereIn('kind', ['teachers', 'staff'])
+    ->whereIn('kind', ['teachers', 'staff', 'guardians'])
     ->whereNumber('id')
     ->middleware('signed')
     ->name('private.person-image');

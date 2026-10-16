@@ -6,6 +6,7 @@ use App\Enums\CredentialPrintReason;
 use App\Enums\CredentialSideStatus;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\PrintJobStatus;
+use App\Models\Concerns\HasCredentialHolder;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,6 +15,8 @@ use Illuminate\Support\Str;
 
 class CredentialPrint extends Model
 {
+    use HasCredentialHolder;
+
     protected $fillable = [
         'uuid',
         'student_id',
@@ -64,6 +67,14 @@ class CredentialPrint extends Model
                 $card->front_status,
                 $card->back_status
             );
+        });
+
+        static::created(fn (CredentialPrint $card) => CredentialReprintRequest::attachCard($card));
+
+        static::updated(function (CredentialPrint $card): void {
+            if ($card->wasChanged(['completed_at', 'open_student_id'])) {
+                CredentialReprintRequest::syncFromCard($card);
+            }
         });
     }
 

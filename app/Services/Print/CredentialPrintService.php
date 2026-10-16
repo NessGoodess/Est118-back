@@ -2,6 +2,7 @@
 
 namespace App\Services\Print;
 
+use App\Enums\CredentialHolderKind;
 use App\Enums\CredentialPrintReason;
 use App\Enums\CredentialSideStatus;
 use App\Enums\PrintBatchStrategy;
@@ -29,7 +30,7 @@ class CredentialPrintService
     public function createBatch(
         array $studentIds,
         User $user,
-        string $templateKey = 'student-card-v1',
+        ?string $templateKey = null,
         PrintBatchStrategy $strategy = PrintBatchStrategy::FrontsThenBacks,
         string $printerId = PrintJobService::DEFAULT_PRINTER_ID
     ): array {
@@ -46,7 +47,7 @@ class CredentialPrintService
             $openCards = CredentialPrint::query()
                 ->open()
                 ->whereIn('student_id', $studentIds)
-                ->with(['printJobs', 'student.profile:id,first_name,last_name'])
+                ->with(['printJobs', 'student.profile:id,first_name,last_name,second_last_name'])
                 ->lockForUpdate()
                 ->get()
                 ->keyBy('student_id');
@@ -98,7 +99,7 @@ class CredentialPrintService
                     }
                     $skipped[] = [
                         'student_id' => (int) $student->id,
-                        'student_name' => trim(($student->profile?->first_name ?? '').' '.($student->profile?->last_name ?? '')),
+                        'student_name' => $student->profile?->fullName() ?? '',
                         'reason' => 'in_queue',
                         'credential_print_id' => null,
                         'batch_uuid' => null,
@@ -134,6 +135,143 @@ class CredentialPrintService
     }
 
     /**
+     * Teacher / staff / guardian badges. $ids are holder ids, not profile ids.
+     *
+     * @param  array<int, int>  $ids
+     * @return array{batch_uuid: ?string, strategy: PrintBatchStrategy, cards: Collection<int, CredentialPrint>, skipped: array<int, array<string, mixed>>}
+     */
+    public function createPersonBatch(
+        CredentialHolderKind $kind,
+        array $ids,
+        User $user,
+        ?string $templateKey = null,
+        string $printerId = PrintJobService::DEFAULT_PRINTER_ID
+    ): array {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if ($ids === []) {
+            throw ValidationException::withMessages([
+                'ids' => ['Se requiere al menos una persona.'],
+            ]);
+        }
+
+        $model = $kind->personModel() ?? throw ValidationException::withMessages([
+            'kind' => ['Los alumnos se imprimen desde su propio flujo.'],
+        ]);
+
+        $holders = $model::query()
+            ->with('profile:id,first_name,last_name,second_last_name')
+            ->whereIn('id', $ids)
+            ->get()
+            ->keyBy('id');
+        if ($holders->count() !== count($ids)) {
+            throw ValidationException::withMessages([
+                'ids' => ["Uno o más registros de {$kind->label()} no existen."],
+            ]);
+        }
+
+        $design = $this->printJobs->resolveDesignForPerson($kind, $templateKey);
+        $facesMode = ($design->faces_mode ?? 'single') === 'double' ? 'double' : 'single';
+        $batchUuid = (string) Str::uuid();
+
+        return DB::transaction(function () use ($kind, $ids, $holders, $user, $design, $facesMode, $printerId, $batchUuid) {
+            $openCards = CredentialPrint::query()
+                ->open()
+                ->where('kind', $kind->value)
+                ->whereIn('profile_id', $holders->pluck('profile_id')->all())
+                ->with('printJobs')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('profile_id');
+
+            $skipped = [];
+            $cards = collect();
+
+            foreach ($ids as $id) {
+                $holder = $holders->get($id);
+                $open = $openCards->get($holder->profile_id);
+                if ($open) {
+                    $skipped[] = [
+                        'id' => $holder->id,
+                        'profile_id' => (int) $holder->profile_id,
+                        'name' => $holder->profile?->fullName() ?? '',
+                        'reason' => $open->openReason() ?? 'in_queue',
+                        'credential_print_id' => (int) $open->id,
+                        'batch_uuid' => (string) $open->batch_uuid,
+                    ];
+
+                    continue;
+                }
+
+                $reprint = CredentialPrint::query()
+                    ->where('kind', $kind->value)
+                    ->where('profile_id', $holder->profile_id)
+                    ->whereNotNull('completed_at')
+                    ->exists();
+
+                $cards->push(CredentialPrint::query()->create([
+                    'student_id' => null,
+                    'profile_id' => $holder->profile_id,
+                    'kind' => $kind,
+                    'card_design_id' => $design->id,
+                    'faces_mode' => $facesMode,
+                    'front_status' => CredentialSideStatus::Pending,
+                    'back_status' => $facesMode === 'double'
+                        ? CredentialSideStatus::Pending
+                        : CredentialSideStatus::NotApplicable,
+                    'strategy' => PrintBatchStrategy::FrontsThenBacks,
+                    'batch_uuid' => $batchUuid,
+                    'reason' => $reprint ? CredentialPrintReason::Reprint : CredentialPrintReason::Initial,
+                    'created_by' => $user->id,
+                ]));
+            }
+
+            if ($cards->isNotEmpty()) {
+                $this->enqueue($cards->pluck('id')->all(), 'front', $user, $printerId);
+            }
+
+            return [
+                'batch_uuid' => $cards->isNotEmpty() ? $batchUuid : null,
+                'strategy' => PrintBatchStrategy::FrontsThenBacks,
+                'cards' => $cards->isNotEmpty()
+                    ? $this->cardsWithRelations(
+                        CredentialPrint::query()->where('batch_uuid', $batchUuid)->orderBy('id')->get()
+                    )
+                    : collect(),
+                'skipped' => $skipped,
+            ];
+        });
+    }
+
+    /**
+     * Latest card per profile for one holder kind.
+     *
+     * @param  array<int, int>  $profileIds
+     * @return array<int, CredentialPrint>
+     */
+    public function latestByProfileIds(CredentialHolderKind $kind, array $profileIds): array
+    {
+        $profileIds = array_values(array_unique(array_map('intval', $profileIds)));
+        if ($profileIds === []) {
+            return [];
+        }
+
+        $cards = $this->cardsWithRelations(
+            CredentialPrint::query()
+                ->where('kind', $kind->value)
+                ->whereIn('profile_id', $profileIds)
+                ->orderByDesc('id')
+                ->get()
+        );
+
+        $latest = [];
+        foreach ($cards as $card) {
+            $latest[$card->profile_id] ??= $card;
+        }
+
+        return $latest;
+    }
+
+    /**
      * @return array{student_id: int, student_name: string, reason: string, credential_print_id: int, batch_uuid: string, created_at: ?string}
      */
     private function skippedPayload(CredentialPrint $open): array
@@ -142,9 +280,7 @@ class CredentialPrintService
 
         return [
             'student_id' => (int) $open->student_id,
-            'student_name' => $profile
-                ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
-                : '',
+            'student_name' => $profile?->fullName() ?? '',
             'reason' => $open->openReason() ?? 'in_queue',
             'credential_print_id' => (int) $open->id,
             'batch_uuid' => (string) $open->batch_uuid,
@@ -515,7 +651,7 @@ class CredentialPrintService
 
     private function markCredentialPrinted(CredentialPrint $card): void
     {
-        if (! $card->academic_year_id) {
+        if (! $card->academic_year_id || ! $card->student_id) {
             return;
         }
 
@@ -608,13 +744,15 @@ class CredentialPrintService
         }
 
         $cards->load([
-            'student.profile:id,first_name,last_name',
+            'student.profile:id,first_name,last_name,second_last_name',
+            'profile:id,first_name,last_name,second_last_name',
             'cardDesign:id,uuid,name,faces_mode',
             'creator:id,name',
             'discarder:id,name',
             'printJobs.creator:id,name',
             'printJobs.canceller:id,name',
-            'printJobs.student.profile:id,first_name,last_name',
+            'printJobs.student.profile:id,first_name,last_name,second_last_name',
+            'printJobs.profile:id,first_name,last_name,second_last_name',
             'printJobs.credentialPrint:id,uuid',
         ]);
 

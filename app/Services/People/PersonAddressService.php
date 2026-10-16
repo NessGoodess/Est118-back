@@ -7,24 +7,33 @@ use App\Models\Profile;
 
 class PersonAddressService
 {
+    private const FIELDS = [
+        'street_type',
+        'street_name',
+        'house_number',
+        'unit_number',
+        'neighborhood_type',
+        'neighborhood_name',
+        'postal_code',
+        'city',
+        'state',
+    ];
+
     /**
+     * Keys missing from $data keep their current value, so a partial PATCH is safe.
+     *
      * @param  array<string, mixed>  $data
      */
     public function upsertFor(Profile $profile, array $data): Address
     {
-        $payload = [
-            'street_type' => $data['street_type'],
-            'street_name' => $data['street_name'],
-            'house_number' => $data['house_number'],
-            'unit_number' => ($data['unit_number'] ?? null) ?: null,
-            'neighborhood_type' => $data['neighborhood_type'],
-            'neighborhood_name' => $data['neighborhood_name'],
-            'postal_code' => $data['postal_code'],
-            'city' => $data['city'],
-            'state' => $data['state'],
-        ];
-
         $address = $profile->address;
+        $payload = [];
+        foreach (self::FIELDS as $field) {
+            $payload[$field] = array_key_exists($field, $data)
+                ? (($data[$field] ?? null) ?: null)
+                : $address?->{$field};
+        }
+
         if ($address) {
             $address->fill($payload)->save();
 

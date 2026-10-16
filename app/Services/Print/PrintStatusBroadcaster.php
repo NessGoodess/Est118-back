@@ -27,7 +27,8 @@ class PrintStatusBroadcaster
                 $fresh = PrintJob::query()
                     ->with([
                         'credentialPrint:id,uuid,batch_uuid',
-                        'student.profile:id,first_name,last_name',
+                        'student.profile:id,first_name,last_name,second_last_name',
+                        'profile:id,first_name,last_name,second_last_name',
                         'creator:id,name',
                         'canceller:id,name',
                         'cardDesign:id,faces_mode',
@@ -55,11 +56,13 @@ class PrintStatusBroadcaster
             try {
                 $fresh = CredentialPrint::query()
                     ->with([
-                        'student.profile:id,first_name,last_name',
+                        'student.profile:id,first_name,last_name,second_last_name',
+                        'profile:id,first_name,last_name,second_last_name',
                         'cardDesign:id,uuid,name',
                         'creator:id,name',
                         'discarder:id,name',
-                        'printJobs.student.profile:id,first_name,last_name',
+                        'printJobs.student.profile:id,first_name,last_name,second_last_name',
+                        'printJobs.profile:id,first_name,last_name,second_last_name',
                         'printJobs.creator:id,name',
                         'printJobs.canceller:id,name',
                         'printJobs.cardDesign:id,faces_mode',
@@ -102,16 +105,15 @@ class PrintStatusBroadcaster
      */
     private function jobPayload(PrintJob $job): array
     {
-        $profile = $job->student?->profile;
         $payload = is_array($job->payload_json) ? $job->payload_json : [];
 
         return [
             'id' => $job->id,
             'uuid' => $job->uuid,
             'student_id' => $job->student_id,
-            'student_name' => $profile
-                ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
-                : null,
+            'profile_id' => $job->profile_id,
+            'kind' => $job->kindValue(),
+            'student_name' => $job->holderName(),
             'credential_print_id' => $job->credential_print_id,
             'credential_print_uuid' => $job->credentialPrint?->uuid,
             'batch_uuid' => $job->credentialPrint?->batch_uuid,
@@ -140,7 +142,6 @@ class PrintStatusBroadcaster
      */
     private function cardPayload(CredentialPrint $card): array
     {
-        $profile = $card->student?->profile;
         $jobs = $card->printJobs->sortBy('id')->values();
         $active = $card->activeJob();
 
@@ -148,9 +149,9 @@ class PrintStatusBroadcaster
             'id' => $card->id,
             'uuid' => $card->uuid,
             'student_id' => $card->student_id,
-            'student_name' => $profile
-                ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
-                : null,
+            'profile_id' => $card->profile_id,
+            'kind' => $card->kindValue(),
+            'student_name' => $card->holderName(),
             'academic_year_id' => $card->academic_year_id,
             'card_design_id' => $card->card_design_id,
             'design_key' => $card->cardDesign?->uuid,

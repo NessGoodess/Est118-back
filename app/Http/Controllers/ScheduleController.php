@@ -150,13 +150,13 @@ class ScheduleController extends Controller
             ->all();
 
         $teachers = Teacher::query()
-            ->with('profile:id,first_name,last_name')
+            ->with('profile:id,first_name,last_name,second_last_name')
             ->where('status', TeacherStatus::ACTIVE)
             ->orderBy('id')
             ->get()
             ->map(fn (Teacher $teacher) => [
                 'id' => $teacher->id,
-                'name' => trim(($teacher->profile?->first_name ?? '').' '.($teacher->profile?->last_name ?? '')),
+                'name' => $teacher->profile?->fullName() ?? '',
             ])
             ->values()
             ->all();

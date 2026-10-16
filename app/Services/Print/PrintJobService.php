@@ -2,15 +2,20 @@
 
 namespace App\Services\Print;
 
+use App\Enums\CredentialHolderKind;
 use App\Enums\EnrollmentStatus;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\PrintJobStatus;
 use App\Jobs\RenderStudentCardJob;
 use App\Models\CardDesign;
 use App\Models\CredentialPrint;
+use App\Models\Guardian;
 use App\Models\PrintJob;
+use App\Models\Staff;
 use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\User;
+use App\Services\People\GuardianCredentialData;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +48,10 @@ class PrintJobService
         string $sideMode = 'front',
         string $printerId = self::DEFAULT_PRINTER_ID
     ): PrintJob {
+        if ($card->student_id === null) {
+            return $this->createJobForPersonCard($card, $creator, $sideMode, $printerId);
+        }
+
         $student = $this->studentForPrint((int) $card->student_id);
         $design = $card->cardDesign ?? CardDesign::query()->find($card->card_design_id);
         if (! $design) {
@@ -66,6 +75,8 @@ class PrintJobService
 
         $job = PrintJob::query()->create([
             'student_id' => $student->id,
+            'profile_id' => $student->profile_id,
+            'kind' => CredentialHolderKind::Students,
             'credential_print_id' => $card->id,
             'printer_id' => $printerId,
             'template_key' => $design->uuid,
@@ -80,6 +91,97 @@ class PrintJobService
         RenderStudentCardJob::dispatch($job->id)->afterCommit();
 
         return $job->fresh() ?? $job;
+    }
+
+    private function createJobForPersonCard(
+        CredentialPrint $card,
+        User $creator,
+        string $sideMode,
+        string $printerId
+    ): PrintJob {
+        $kind = $card->kind ?? CredentialHolderKind::Students;
+        $holder = $this->personForPrint($kind, (int) $card->profile_id);
+        $design = $card->cardDesign ?? CardDesign::query()->find($card->card_design_id);
+        if (! $design) {
+            throw ValidationException::withMessages([
+                'card_design_id' => ['La tarjeta no tiene un diseño asociado.'],
+            ]);
+        }
+
+        $facesMode = ($card->faces_mode ?? $design->faces_mode ?? 'single') === 'double' ? 'double' : 'single';
+        $payload = $this->cards->payloadFromPerson($kind, $holder);
+        $payload['orientation'] = $design->orientation === 'portrait' ? 'portrait' : 'landscape';
+        $payload['faces_mode'] = $facesMode;
+        $payload['design_key'] = $design->uuid;
+        $payload['design_label'] = $design->name;
+
+        $job = PrintJob::query()->create([
+            'student_id' => null,
+            'profile_id' => $card->profile_id,
+            'kind' => $kind,
+            'credential_print_id' => $card->id,
+            'printer_id' => $printerId,
+            'template_key' => $design->uuid,
+            'card_design_id' => $design->id,
+            'side_mode' => $this->resolveSideMode($sideMode, $facesMode),
+            'status' => PrintJobStatus::Pending,
+            'payload_json' => $payload,
+            'created_by' => $creator->id,
+            'academic_year_id' => $card->academic_year_id,
+        ]);
+
+        RenderStudentCardJob::dispatch($job->id)->afterCommit();
+
+        return $job->fresh() ?? $job;
+    }
+
+    /**
+     * Teacher, Staff or Guardian row for a profile, with the profile loaded.
+     */
+    public function personForPrint(CredentialHolderKind $kind, int $profileId): Teacher|Staff|Guardian
+    {
+        $model = $kind->personModel() ?? throw ValidationException::withMessages([
+            'kind' => ['Los alumnos se imprimen desde su propio flujo.'],
+        ]);
+
+        $relations = $kind === CredentialHolderKind::Guardians ? GuardianCredentialData::RELATIONS : ['profile.address'];
+        $holder = $model::query()->with($relations)->where('profile_id', $profileId)->first();
+        if (! $holder?->profile) {
+            throw ValidationException::withMessages([
+                'ids' => ["{$kind->label()} no encontrado o sin perfil."],
+            ]);
+        }
+
+        return $holder;
+    }
+
+    public function resolveDesignForPerson(CredentialHolderKind $kind, ?string $preferredKey = null): CardDesign
+    {
+        if (is_string($preferredKey) && trim($preferredKey) !== '') {
+            try {
+                $design = $this->templates->findDesign($preferredKey);
+                if ($design->audience === $kind->value) {
+                    return $design;
+                }
+            } catch (\Throwable) {
+                // Fall through to the audience default.
+            }
+        }
+
+        $design = CardDesign::query()
+            ->where('is_active', true)
+            ->where('audience', $kind->value)
+            ->orderByDesc('is_default')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $design) {
+            throw ValidationException::withMessages([
+                'template_key' => ["No hay un diseño de credencial activo para {$kind->label()}."],
+            ]);
+        }
+
+        return $design;
     }
 
     /**
@@ -122,7 +224,7 @@ class PrintJobService
      * @param  array<int, int>  $studentIds
      * @return array<int, array<string, mixed>>
      */
-    public function resolveDesigns(array $studentIds, string $templateKey = 'student-card-v1'): array
+    public function resolveDesigns(array $studentIds, ?string $templateKey = null): array
     {
         $studentIds = array_values(array_unique(array_map('intval', $studentIds)));
         $rows = [];
@@ -135,7 +237,7 @@ class PrintJobService
 
             $rows[] = [
                 'student_id' => $student->id,
-                'student_name' => trim(($profile?->first_name ?? '').' '.($profile?->last_name ?? '')),
+                'student_name' => $profile?->fullName() ?? '',
                 'design_key' => $design->uuid,
                 'design_label' => $design->name,
                 'faces_mode' => $facesMode,
@@ -158,7 +260,10 @@ class PrintJobService
     public function listFiltered(int $perPage = 20, array $filters = []): LengthAwarePaginator
     {
         $q = PrintJob::query()
-            ->with(['student.profile:id,first_name,last_name'])
+            ->with([
+                'student.profile:id,first_name,last_name,second_last_name',
+                'profile:id,first_name,last_name,second_last_name',
+            ])
             ->orderByDesc('id');
 
         if (! empty($filters['student_ids']) && is_array($filters['student_ids'])) {
@@ -418,7 +523,10 @@ class PrintJobService
     public function queueSnapshot(string $printerId = self::DEFAULT_PRINTER_ID): array
     {
         $jobs = PrintJob::query()
-            ->with(['student.profile:id,first_name,last_name'])
+            ->with([
+                'student.profile:id,first_name,last_name,second_last_name',
+                'profile:id,first_name,last_name,second_last_name',
+            ])
             ->where('printer_id', $printerId)
             ->whereIn('status', [
                 PrintJobStatus::Pending->value,

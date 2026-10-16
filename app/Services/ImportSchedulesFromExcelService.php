@@ -625,7 +625,7 @@ class ImportSchedulesFromExcelService
 
         foreach ($this->teachersCache as $teacher) {
             $first = AdmissionWorkshop::normalize($teacher->profile?->first_name ?? '');
-            $last = AdmissionWorkshop::normalize($teacher->profile?->last_name ?? '');
+            $last = AdmissionWorkshop::normalize($teacher->profile?->fullLastName() ?? '');
             $full = $first.$last;
             if ($full !== '' && $full === $needle) {
                 return $teacher;

@@ -43,6 +43,14 @@ class PermissionSeeder extends Seeder
             'view student photos',
             'manage student photos',
 
+            // Teacher / staff badges (student cards keep view/edit students)
+            'print credentials',
+
+            // Credential reprint requests: reception asks, school control approves, comptroller charges
+            'request credential reprints',
+            'approve credential reprints',
+            'register credential payments',
+
             // Admissions
             'view pre-enrollments',
             'create pre-enrollments',

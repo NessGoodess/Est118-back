@@ -28,6 +28,9 @@ class RenderStudentCardJob implements ShouldQueue
 
     public function handle(StudentCardRenderService $renderer): void
     {
+        // GD decodes photos uncompressed (~4 bytes/px); the CLI default of 128M is too tight.
+        @ini_set('memory_limit', '512M');
+
         $job = PrintJob::query()->find($this->printJobId);
         if (! $job) {
             return;

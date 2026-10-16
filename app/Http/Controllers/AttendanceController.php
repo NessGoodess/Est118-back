@@ -58,7 +58,7 @@ class AttendanceController extends Controller
 
             return [
                 'student_id' => $student->id,
-                'last_name' => $student->profile->last_name,
+                'last_name' => $student->profile->fullLastName(),
                 'name' => $student->profile->first_name,
                 'current_attendance' => $existingAttendance ? [
                     'status' => $existingAttendance->status,

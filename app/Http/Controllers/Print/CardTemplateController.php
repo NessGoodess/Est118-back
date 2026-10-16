@@ -49,7 +49,7 @@ class CardTemplateController extends Controller
     {
         $data = $request->validate([
             'label' => ['required', 'string', 'max:120'],
-            'audience' => ['required', 'in:students,staff,teachers'],
+            'audience' => ['required', 'in:students,staff,teachers,guardians'],
             'grade_level_id' => ['sometimes', 'nullable', 'integer', 'exists:grade_levels,id'],
             'grades' => ['sometimes', 'array'],
             'grades.*' => ['integer'],
@@ -77,7 +77,7 @@ class CardTemplateController extends Controller
         $data = $request->validate([
             'meta' => ['required', 'array'],
             'meta.label' => ['required', 'string', 'max:120'],
-            'meta.audience' => ['required', 'in:students,staff,teachers'],
+            'meta.audience' => ['required', 'in:students,staff,teachers,guardians'],
             'meta.grade_level_id' => ['sometimes', 'nullable', 'integer', 'exists:grade_levels,id'],
             'meta.grades' => ['sometimes', 'array'],
             'meta.description' => ['sometimes', 'string', 'max:500'],

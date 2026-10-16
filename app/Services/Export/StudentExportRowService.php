@@ -5,6 +5,7 @@ namespace App\Services\Export;
 use App\Enums\EnrollmentStatus;
 use App\Enums\WorkshopEnrollmentStatus;
 use App\Models\Guardian;
+use App\Models\Profile;
 use App\Models\Student;
 use Carbon\Carbon;
 use DateTimeInterface;
@@ -54,7 +55,7 @@ class StudentExportRowService
     private function mapStudent(Student $student, int $np): array
     {
         $profile = $student->profile;
-        [$paternal, $maternal] = $this->splitLastName($profile?->last_name);
+        [$paternal, $maternal] = $this->surnames($profile);
         $firstName = trim((string) ($profile?->first_name ?? ''));
         $curp = strtoupper(trim((string) ($profile?->national_id ?? '')));
         $birthDate = $this->formatDate($profile?->birth_date) ?: $this->birthDateFromCurp($curp);
@@ -83,7 +84,7 @@ class StudentExportRowService
         $address = $profile?->address;
         $guardian = $student->guardians->first();
         $gProfile = $guardian?->profile;
-        [$gPaternal, $gMaternal] = $this->splitLastName($gProfile?->last_name);
+        [$gPaternal, $gMaternal] = $this->surnames($gProfile);
         $gFirst = trim((string) ($gProfile?->first_name ?? ''));
 
         $fullName = trim($paternal.' '.$maternal.' '.$firstName);
@@ -123,6 +124,19 @@ class StudentExportRowService
     /**
      * @return array{0: string, 1: string}
      */
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function surnames(?Profile $profile): array
+    {
+        $maternal = trim((string) ($profile?->second_last_name ?? ''));
+        if ($maternal !== '') {
+            return [trim((string) $profile->last_name), $maternal];
+        }
+
+        return $this->splitLastName($profile?->last_name);
+    }
+
     private function splitLastName(?string $lastName): array
     {
         $lastName = trim((string) $lastName);

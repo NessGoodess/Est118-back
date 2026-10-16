@@ -23,7 +23,9 @@ class StaffCrudTest extends TestCase
             ->assertJsonPath('data.personal.first_name', 'ROSA');
 
         $id = $response->json('data.id');
-        $this->assertSame('PEREZ DIAZ', Staff::query()->find($id)?->profile?->last_name);
+        $profile = Staff::query()->find($id)?->profile;
+        $this->assertSame('PEREZ', $profile?->last_name);
+        $this->assertSame('DIAZ', $profile?->second_last_name);
 
         $this->patchJson("/api/staff/{$id}", [
             'job' => [

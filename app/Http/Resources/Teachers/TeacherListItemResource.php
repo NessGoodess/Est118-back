@@ -20,7 +20,7 @@ class TeacherListItemResource extends JsonResource
         return [
             'id' => $teacher->id,
             'first_name' => $profile?->first_name,
-            'last_name' => $profile?->last_name,
+            'last_name' => $profile?->fullLastName(),
             'curp' => $profile?->national_id,
             'phone' => $profile?->phone_number,
             'email' => $profile?->email,

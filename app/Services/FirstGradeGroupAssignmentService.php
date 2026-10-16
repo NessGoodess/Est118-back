@@ -50,7 +50,7 @@ class FirstGradeGroupAssignmentService
         $groupNamesById = $groups->pluck('name', 'id')->all();
 
         $enrollmentsInGroups = Enrollment::query()
-            ->with(['student.profile:id,first_name,last_name'])
+            ->with(['student.profile:id,first_name,last_name,second_last_name'])
             ->where('academic_year_id', $academicYearId)
             ->where('status', EnrollmentStatus::Active->value)
             ->whereIn('class_group_id', $groupIds)
@@ -151,10 +151,7 @@ class FirstGradeGroupAssignmentService
             return [
                 'enrollment_id' => $enrollment->id,
                 'student_id' => $enrollment->student_id,
-                'student_name' => trim(
-                    ($enrollment->student?->profile?->first_name ?? '').' '.
-                    ($enrollment->student?->profile?->last_name ?? '')
-                ),
+                'student_name' => $enrollment->student?->profile?->fullName() ?? '',
                 'surname_token' => $surnameToken,
                 'previous_school' => $pre?->previous_school,
                 'previous_school_norm' => $schoolNorm,

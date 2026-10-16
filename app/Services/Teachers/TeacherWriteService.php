@@ -28,6 +28,8 @@ class TeacherWriteService
                 'profile_id' => $profile->id,
                 'employee' => ($data['employee'] ?? null) ?: null,
                 'classroom' => ($data['classroom'] ?? null) ?: null,
+                'position' => ($data['position'] ?? null) ?: null,
+                'department' => ($data['department'] ?? null) ?: null,
                 'status' => $data['status'] ?? TeacherStatus::ACTIVE,
             ]);
 
@@ -54,6 +56,8 @@ class TeacherWriteService
                 $teacher->fill([
                     'employee' => array_key_exists('employee', $job) ? (($job['employee'] ?? null) ?: null) : $teacher->employee,
                     'classroom' => array_key_exists('classroom', $job) ? (($job['classroom'] ?? null) ?: null) : $teacher->classroom,
+                    'position' => array_key_exists('position', $job) ? (($job['position'] ?? null) ?: null) : $teacher->position,
+                    'department' => array_key_exists('department', $job) ? (($job['department'] ?? null) ?: null) : $teacher->department,
                     'status' => $job['status'] ?? $teacher->status,
                 ])->save();
             }

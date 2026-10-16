@@ -32,10 +32,7 @@ class RecentReadingResource extends JsonResource
             'id' => $student->id,
             'reading_id' => $this->id,
             'credential_id' => $this->credential_id ?? $student->credential_id,
-            'name' => trim(collect([
-                $student->profile?->first_name,
-                $student->profile?->last_name,
-            ])->filter()->join(' ')),
+            'name' => $student->profile?->fullName() ?? '',
             'photo_url' => $photoPathService->signedUrl($student, 'profile'),
             'gender' => $student->profile?->gender,
             'grade' => $student->currentGroup?->gradeLevel?->name,

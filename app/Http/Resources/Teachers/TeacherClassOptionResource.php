@@ -26,9 +26,7 @@ class TeacherClassOptionResource extends JsonResource
             'group' => $group?->name,
             'academic_year_id' => $group?->academic_year_id,
             'teacher_id' => $class->teacher_id,
-            'teacher_name' => $current
-                ? trim($current->first_name.' '.$current->last_name)
-                : null,
+            'teacher_name' => $current?->fullName(),
         ];
     }
 }

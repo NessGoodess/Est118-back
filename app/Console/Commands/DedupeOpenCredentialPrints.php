@@ -30,7 +30,7 @@ class DedupeOpenCredentialPrints extends Command
 
         $open = CredentialPrint::query()
             ->open()
-            ->with(['printJobs', 'student.profile:id,first_name,last_name'])
+            ->with(['printJobs', 'student.profile:id,first_name,last_name,second_last_name'])
             ->orderBy('id')
             ->get()
             ->groupBy('student_id');
@@ -104,9 +104,7 @@ class DedupeOpenCredentialPrints extends Command
     {
         $profile = $card->student?->profile;
 
-        $name = $profile
-            ? trim(($profile->first_name ?? '').' '.($profile->last_name ?? ''))
-            : '';
+        $name = $profile?->fullName() ?? '';
 
         return $name !== '' ? $name : "alumno #{$card->student_id}";
     }

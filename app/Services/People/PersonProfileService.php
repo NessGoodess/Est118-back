@@ -42,18 +42,16 @@ class PersonProfileService
      */
     private function attributes(array $data, ?string $curp, ?Profile $current = null): array
     {
-        $paterno = array_key_exists('last_name', $data)
-            ? (string) $data['last_name']
-            : ($current?->last_name ?? '');
+        $paterno = trim((string) ($data['last_name'] ?? ''));
         $materno = array_key_exists('second_last_name', $data)
-            ? (string) ($data['second_last_name'] ?? '')
-            : '';
-        $lastName = trim($paterno.' '.$materno);
+            ? trim((string) ($data['second_last_name'] ?? ''))
+            : (string) ($current?->second_last_name ?? '');
 
         return [
             'national_id' => $curp,
             'first_name' => $data['first_name'] ?? $current?->first_name,
-            'last_name' => $lastName !== '' ? $lastName : $current?->last_name,
+            'last_name' => $paterno !== '' ? $paterno : $current?->last_name,
+            'second_last_name' => $materno !== '' ? $materno : null,
             'birth_date' => $data['birth_date'] ?? $current?->birth_date,
             'gender' => $data['gender'] ?? $current?->gender,
             'email' => array_key_exists('email', $data) ? (($data['email'] ?? null) ?: null) : $current?->email,

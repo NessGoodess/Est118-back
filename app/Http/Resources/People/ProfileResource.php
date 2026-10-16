@@ -21,7 +21,7 @@ class ProfileResource extends JsonResource
             'id' => $profile->id,
             'first_name' => $profile->first_name,
             'last_name' => $profile->last_name,
-            'second_last_name' => '',
+            'second_last_name' => $profile->second_last_name ?? '',
             'curp' => $profile->national_id,
             'birth_date' => $profile->birth_date,
             'gender' => $profile->gender,

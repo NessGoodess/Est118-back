@@ -229,15 +229,11 @@ class ConvertPreEnrollmentToStudentService
                     'state' => $locked->state,
                 ]);
 
-                $studentLastName = trim(implode(' ', array_filter([
-                    $locked->last_name,
-                    $locked->second_last_name,
-                ])));
-
                 $studentProfile = Profile::create([
                     'national_id' => $aspirantCurp,
                     'first_name' => $locked->first_name,
-                    'last_name' => $studentLastName !== '' ? $studentLastName : $locked->last_name,
+                    'last_name' => trim((string) $locked->last_name),
+                    'second_last_name' => trim((string) $locked->second_last_name) ?: null,
                     'birth_date' => $locked->birth_date,
                     'gender' => $locked->gender,
                     'email' => $locked->student_email,
@@ -249,16 +245,12 @@ class ConvertPreEnrollmentToStudentService
                     'profile_id' => $studentProfile->id,
                 ]);
 
-                $guardianLast = trim(implode(' ', array_filter([
-                    $locked->guardian_last_name,
-                    $locked->guardian_second_last_name,
-                ])));
-
                 $guardianProfile = Profile::firstOrCreate(
                     ['national_id' => strtoupper(trim((string) $locked->guardian_curp))],
                     [
                         'first_name' => $locked->guardian_first_name,
-                        'last_name' => $guardianLast !== '' ? $guardianLast : $locked->guardian_last_name,
+                        'last_name' => trim((string) $locked->guardian_last_name),
+                        'second_last_name' => trim((string) $locked->guardian_second_last_name) ?: null,
                         'gender' => 'O',
                         'birth_date' => null,
                         'email' => $locked->contact_email,

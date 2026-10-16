@@ -36,7 +36,7 @@ class StudentListItemResource extends JsonResource
             'id' => $student->id,
             'credential_id' => $student->credential_id,
             'name' => trim($student->profile?->first_name ?? ''),
-            'last_name' => trim($student->profile?->last_name ?? ''),
+            'last_name' => $student->profile?->fullLastName() ?? '',
             'birth_date' => $student->profile?->birth_date,
             'gender' => $student->profile?->gender,
             'phone' => $student->profile?->phone_number,

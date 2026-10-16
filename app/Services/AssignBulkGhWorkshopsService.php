@@ -89,10 +89,7 @@ class AssignBulkGhWorkshopsService
             $assignments[] = [
                 'enrollment_id' => $enrollment->id,
                 'student_id' => $enrollment->student_id,
-                'student_name' => trim(
-                    ($enrollment->student?->profile?->first_name ?? '').' '.
-                    ($enrollment->student?->profile?->last_name ?? '')
-                ),
+                'student_name' => $enrollment->student?->profile?->fullName() ?? '',
                 'class_group_name' => $letter,
                 'workshop_id' => $workshop?->id,
                 'workshop_name' => $workshop?->name,

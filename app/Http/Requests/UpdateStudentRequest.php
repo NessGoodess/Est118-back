@@ -2,11 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\People\PersonRules;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class UpdateStudentRequest extends FormRequest
 {
+    use PersonRules;
+
     public function authorize(): bool
     {
         return true; // Route already requires permission:edit students
@@ -19,26 +21,46 @@ class UpdateStudentRequest extends FormRequest
     {
         return [
             'profile' => ['sometimes', 'array'],
-            'profile.first_name' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'profile.last_name' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'profile.national_id' => ['sometimes', 'nullable', 'string', 'max:18'],
-            'profile.birth_date' => ['sometimes', 'nullable', 'date'],
-            'profile.gender' => ['sometimes', 'nullable', Rule::in(['M', 'F', 'O'])],
-            'profile.phone_number' => ['sometimes', 'nullable', 'string', 'max:30'],
-            'profile.phone_second_number' => ['sometimes', 'nullable', 'string', 'max:30'],
-            'profile.email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            ...$this->personRules('profile', false),
+            'profile.phone_second_number' => ['sometimes', 'nullable', 'digits:10'],
 
             'address' => ['sometimes', 'array'],
-            'address.street_type' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'address.street_name' => ['sometimes', 'nullable', 'string', 'max:150'],
-            'address.house_number' => ['sometimes', 'nullable', 'string', 'max:30'],
-            'address.unit_number' => ['sometimes', 'nullable', 'string', 'max:30'],
-            'address.apartament_number' => ['sometimes', 'nullable', 'string', 'max:30'],
-            'address.neighborhood_type' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'address.neighborhood_name' => ['sometimes', 'nullable', 'string', 'max:150'],
-            'address.postal_code' => ['sometimes', 'nullable', 'string', 'max:10'],
-            'address.city' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'address.state' => ['sometimes', 'nullable', 'string', 'max:100'],
+            ...$this->addressRules('address', false),
         ];
+    }
+
+    /**
+     * Older clients send the raw column names (national_id, phone_number, apartament_number).
+     */
+    protected function prepareForValidation(): void
+    {
+        $profile = $this->input('profile');
+        if (is_array($profile)) {
+            $profile = $this->renameKey($profile, 'national_id', 'curp');
+            $profile = $this->renameKey($profile, 'phone_number', 'phone');
+            if (isset($profile['curp']) && is_string($profile['curp'])) {
+                $profile['curp'] = strtoupper(trim($profile['curp']));
+            }
+            $this->merge(['profile' => $profile]);
+        }
+
+        $address = $this->input('address');
+        if (is_array($address)) {
+            $this->merge(['address' => $this->renameKey($address, 'apartament_number', 'unit_number')]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function renameKey(array $data, string $from, string $to): array
+    {
+        if (array_key_exists($from, $data) && ! array_key_exists($to, $data)) {
+            $data[$to] = $data[$from];
+        }
+        unset($data[$from]);
+
+        return $data;
     }
 }

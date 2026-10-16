@@ -2,11 +2,17 @@
 
 namespace App\Services\Print;
 
+use App\Enums\CredentialHolderKind;
 use App\Enums\PrintJobStatus;
 use App\Enums\WorkshopEnrollmentStatus;
+use App\Models\Guardian;
 use App\Models\PrintJob;
+use App\Models\Staff;
 use App\Models\Student;
+use App\Models\Teacher;
 use App\Services\CredentialPrintingService;
+use App\Services\People\GuardianCredentialData;
+use App\Services\People\PersonPhotoPathService;
 use App\Services\StudentPhotoPathService;
 use Endroid\QrCode\Color\Color;
 use Endroid\QrCode\Encoding\Encoding;
@@ -23,7 +29,9 @@ class StudentCardRenderService
     public function __construct(
         private readonly StudentPhotoPathService $photoPaths,
         private readonly CredentialPrintingService $credentials,
-        private readonly CardTemplateService $templates
+        private readonly CardTemplateService $templates,
+        private readonly PersonPhotoPathService $personPhotos,
+        private readonly GuardianCredentialData $guardians
     ) {}
 
     public function render(PrintJob $job): PrintJob
@@ -35,7 +43,7 @@ class StudentCardRenderService
 
         $frontRel = 'print-jobs/'.$job->uuid.'/front.png';
         $this->writePng(
-            $this->compose($templateKey, (int) $job->student_id, $payload, $side),
+            $this->compose($templateKey, (int) $job->student_id, $payload, $side, $this->personPhotoPath($job)),
             $frontRel
         );
 
@@ -87,7 +95,7 @@ class StudentCardRenderService
         $enrollment = $student->currentEnrollment;
         $grade = $enrollment?->classGroup?->gradeLevel?->name ?? '';
         $group = $enrollment?->classGroup?->name ?? '';
-        $fullName = trim(($student->profile?->first_name ?? '').' '.($student->profile?->last_name ?? ''));
+        $fullName = $student->profile?->fullName() ?? '';
 
         $yearId = (int) ($enrollment?->academic_year_id ?? 0);
         $workshopName = '';
@@ -102,9 +110,7 @@ class StudentCardRenderService
             ? $student->guardians->first()
             : $student->guardians()->with('profile')->first();
         $gProfile = $guardian?->profile;
-        $tutorName = $gProfile
-            ? trim(($gProfile->first_name ?? '').' '.($gProfile->last_name ?? ''))
-            : '';
+        $tutorName = $gProfile?->fullName() ?? '';
 
         return [
             'full_name' => $fullName,
@@ -125,11 +131,95 @@ class StudentCardRenderService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function payloadFromPerson(CredentialHolderKind $kind, Teacher|Staff|Guardian $holder): array
+    {
+        if ($holder instanceof Guardian) {
+            return $this->payloadFromGuardian($holder);
+        }
+
+        $profile = $holder->profile;
+        $role = (string) ($holder->position ?: ($holder instanceof Teacher ? 'Docente' : $kind->label()));
+        $department = (string) ($holder->department ?? '');
+
+        return [
+            'holder_kind' => $kind->value,
+            'holder_id' => $holder->id,
+            'full_name' => $profile?->fullName() ?? '',
+            'grade' => '',
+            'group' => '',
+            'grade_group' => '',
+            'curp' => $profile?->national_id ?? '',
+            'credential_id' => $holder instanceof Teacher ? (string) ($holder->employee ?? '') : '',
+            'address' => $this->credentials->formatAddress($profile?->address),
+            'workshop' => '',
+            'tutor' => '',
+            'student_phone' => (string) ($profile?->phone_number ?? ''),
+            'tutor_phone' => '',
+            'school' => 'EST 118',
+            'role' => $role,
+            'department' => $department,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function payloadFromGuardian(Guardian $guardian): array
+    {
+        $guardian->loadMissing(GuardianCredentialData::RELATIONS);
+        $profile = $guardian->profile;
+
+        return [
+            'holder_kind' => CredentialHolderKind::Guardians->value,
+            'holder_id' => $guardian->id,
+            'full_name' => $profile?->fullName() ?? '',
+            'grade' => '',
+            'group' => '',
+            'grade_group' => '',
+            'curp' => $profile?->national_id ?? '',
+            'credential_id' => $this->guardians->folio($guardian),
+            'address' => $this->credentials->formatAddress($profile?->address),
+            'workshop' => '',
+            'tutor' => '',
+            'student_phone' => (string) ($profile?->phone_number ?? ''),
+            'tutor_phone' => '',
+            'school' => 'EST 118',
+            'role' => CredentialHolderKind::Guardians->label(),
+            'department' => '',
+            ...$this->guardians->cardFields($guardian),
+        ];
+    }
+
+    private function personPhotoPath(PrintJob $job): ?string
+    {
+        if ($job->student_id !== null) {
+            return null;
+        }
+
+        $kind = $job->kind instanceof CredentialHolderKind ? $job->kind : CredentialHolderKind::tryFrom((string) $job->kind);
+        $photoKind = $kind?->photoKind();
+        $holderId = (int) data_get($job->payload_json, 'holder_id', 0);
+        if (! $photoKind || $holderId < 1) {
+            return null;
+        }
+
+        return $this->personPhotos->resolvePath($photoKind, $holderId, 'original')
+            ?? $this->personPhotos->resolvePath($photoKind, $holderId, 'profile');
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return \GdImage|resource
      */
-    public function compose(string $templateKey, int $studentId, array $payload, string $side = 'front')
-    {
+    public function compose(
+        string $templateKey,
+        int $studentId,
+        array $payload,
+        string $side = 'front',
+        ?string $photoPath = null
+    ) {
         if (! function_exists('imagecreatetruecolor')) {
             throw new RuntimeException('PHP GD extension is required to render student cards.');
         }
@@ -211,10 +301,11 @@ class StudentCardRenderService
                         $w,
                         $h,
                         (float) ($photoBox['rotate'] ?? 0),
-                        function ($target, $dx, $dy) use ($studentId, $photoBox, $w, $h) {
+                        function ($target, $dx, $dy) use ($studentId, $photoPath, $photoBox, $w, $h) {
                             $this->drawPhoto(
                                 $target,
                                 $studentId,
+                                $photoPath,
                                 $dx,
                                 $dy,
                                 $w,
@@ -294,6 +385,9 @@ class StudentCardRenderService
         if ($text === '') {
             return;
         }
+        if ((bool) ($field['uppercase'] ?? false)) {
+            $text = mb_strtoupper($text, 'UTF-8');
+        }
         $bold = (bool) ($field['bold'] ?? false);
         [$regular, $boldFile] = CardFonts::pairFromFile(
             (string) ($field['font'] ?? $layout['font'] ?? CardFonts::DEFAULT_FILE)
@@ -309,6 +403,12 @@ class StudentCardRenderService
         $w = max(48, (int) ($field['w'] ?? 0));
         $size = (float) ($field['size'] ?? 22);
         $fontPath = CardFonts::resolvePath($bold ? $boldFile : $regular);
+        $boxH = max(0, (int) ($field['h'] ?? 0));
+        if (($field['fit'] ?? 'grow') === 'shrink' && $boxH > 0) {
+            while ($size > 8 && $this->textBlockHeight($text, $size, $fontPath, $w) > $boxH) {
+                $size -= 1;
+            }
+        }
         $contentH = $this->textBlockHeight($text, $size, $fontPath, $w);
         $h = max($contentH, max(0, (int) ($field['h'] ?? 0)), 32);
         $color = $this->hexToColor($img, (string) ($field['color'] ?? $defaultColor));
@@ -481,6 +581,7 @@ class StudentCardRenderService
     private function drawPhoto(
         $img,
         int $studentId,
+        ?string $photoPath,
         int $x,
         int $y,
         int $w,
@@ -505,11 +606,14 @@ class StudentCardRenderService
             );
         }
 
-        $student = Student::query()->find($studentId);
-        $rel = $student
-            ? ($this->photoPaths->resolveRelativePath($student, 'original')
-                ?? $this->photoPaths->resolveRelativePath($student, 'profile'))
-            : null;
+        $rel = $photoPath;
+        if ($rel === null && $studentId > 0) {
+            $student = Student::query()->find($studentId);
+            $rel = $student
+                ? ($this->photoPaths->resolveRelativePath($student, 'original')
+                    ?? $this->photoPaths->resolveRelativePath($student, 'profile'))
+                : null;
+        }
 
         $layer = imagecreatetruecolor($w, $h);
         if ($layer === false) {
@@ -534,7 +638,8 @@ class StudentCardRenderService
                 CardFonts::resolvePath(CardFonts::DEFAULT_BOLD)
             );
         } else {
-            $photo = $this->decodeOrientedPhoto($rel);
+            // 3x the box keeps print sharpness while capping the decoded buffer.
+            $photo = $this->decodeOrientedPhoto($rel, $w * 3, $h * 3);
             if ($photo !== null) {
                 $this->copyCover($layer, $photo, 0, 0, $w, $h);
                 imagedestroy($photo);
@@ -666,11 +771,12 @@ class StudentCardRenderService
     }
 
     /**
-     * Decode a stored photo applying EXIF orientation (GD imagecreatefromstring does not).
+     * Decode a stored photo applying EXIF orientation (GD imagecreatefromstring does not),
+     * downscaled to at most $maxW x $maxH so phone originals (12 MP+) don't exhaust memory.
      *
      * @return \GdImage|resource|null
      */
-    private function decodeOrientedPhoto(string $relative): mixed
+    private function decodeOrientedPhoto(string $relative, int $maxW, int $maxH): mixed
     {
         $absolute = Storage::disk('private')->path($relative);
         if (! is_file($absolute)) {
@@ -678,17 +784,16 @@ class StudentCardRenderService
         }
 
         try {
-            $encoded = (string) (new ImageManager(new Driver()))->read($absolute)->toJpeg(92);
+            $image = (new ImageManager(new Driver()))->read($absolute);
+            $image->scaleDown(width: max(1, $maxW), height: max(1, $maxH));
+
+            return $image->core()->native();
         } catch (\Throwable) {
             $bytes = Storage::disk('private')->get($relative);
             $fallback = $bytes !== null && $bytes !== '' ? @imagecreatefromstring($bytes) : false;
 
             return $fallback === false ? null : $fallback;
         }
-
-        $photo = @imagecreatefromstring($encoded);
-
-        return $photo === false ? null : $photo;
     }
 
     /**

@@ -13,6 +13,8 @@ class CardTemplateService
 {
     public const BASE = 'app/card-templates';
 
+    public const AUDIENCES = ['students', 'staff', 'teachers', 'guardians'];
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -130,7 +132,7 @@ class CardTemplateService
             'user_id' => $user->id,
             'grade_level_id' => $gradeLevelId,
             'name' => $name,
-            'audience' => in_array(($meta['audience'] ?? 'students'), ['students', 'staff', 'teachers'], true)
+            'audience' => in_array(($meta['audience'] ?? 'students'), self::AUDIENCES, true)
                 ? $meta['audience']
                 : 'students',
             'description' => (string) ($meta['description'] ?? ''),
@@ -288,25 +290,35 @@ class CardTemplateService
     }
 
     /**
-     * @return array<int, array{key: string, label: string}>
+     * Fields without `audiences` apply to every design.
+     *
+     * @return array<int, array{key: string, label: string, audiences?: array<int, string>}>
      */
     public function availableFields(): array
     {
+        $students = ['students'];
+        $people = ['teachers', 'staff'];
+        $guardians = ['guardians'];
+
         return [
             ['key' => 'full_name', 'label' => 'Nombre completo'],
-            ['key' => 'grade', 'label' => 'Grado'],
-            ['key' => 'group', 'label' => 'Grupo'],
-            ['key' => 'grade_group', 'label' => 'Grado y grupo'],
+            ['key' => 'grade', 'label' => 'Grado', 'audiences' => $students],
+            ['key' => 'group', 'label' => 'Grupo', 'audiences' => $students],
+            ['key' => 'grade_group', 'label' => 'Grado y grupo', 'audiences' => $students],
             ['key' => 'curp', 'label' => 'CURP'],
-            ['key' => 'credential_id', 'label' => 'CURP (folio)'],
+            ['key' => 'credential_id', 'label' => 'Folio'],
             ['key' => 'address', 'label' => 'Dirección'],
-            ['key' => 'workshop', 'label' => 'Taller'],
-            ['key' => 'tutor', 'label' => 'Tutor'],
-            ['key' => 'student_phone', 'label' => 'Teléfono alumno'],
-            ['key' => 'tutor_phone', 'label' => 'Teléfono tutor'],
+            ['key' => 'workshop', 'label' => 'Taller', 'audiences' => $students],
+            ['key' => 'tutor', 'label' => 'Tutor', 'audiences' => $students],
+            ['key' => 'student_phone', 'label' => 'Teléfono'],
+            ['key' => 'tutor_phone', 'label' => 'Teléfono tutor', 'audiences' => $students],
             ['key' => 'school', 'label' => 'Escuela'],
-            ['key' => 'role', 'label' => 'Rol / cargo (staff)'],
-            ['key' => 'department', 'label' => 'Área (staff)'],
+            ['key' => 'role', 'label' => 'Puesto o cargo', 'audiences' => [...$people, ...$guardians]],
+            ['key' => 'department', 'label' => 'Departamento', 'audiences' => $people],
+            ['key' => 'kinship', 'label' => 'Parentesco', 'audiences' => $guardians],
+            ['key' => 'dependent', 'label' => 'Menor a cargo', 'audiences' => $guardians],
+            ['key' => 'dependents', 'label' => 'Menores a cargo (lista)', 'audiences' => $guardians],
+            ['key' => 'second_guardian', 'label' => 'Segundo tutor autorizado', 'audiences' => $guardians],
         ];
     }
 
@@ -369,7 +381,7 @@ class CardTemplateService
 
         $design->fill([
             'name' => $name !== '' ? $name : $design->name,
-            'audience' => in_array(($meta['audience'] ?? $design->audience), ['students', 'staff', 'teachers'], true)
+            'audience' => in_array(($meta['audience'] ?? $design->audience), self::AUDIENCES, true)
                 ? ($meta['audience'] ?? $design->audience)
                 : $design->audience,
             'description' => (string) ($meta['description'] ?? $design->description),
@@ -503,6 +515,8 @@ class CardTemplateService
                     ? (string) $field['valign']
                     : 'top',
                 'rotate' => $this->normalizeRotate($field['rotate'] ?? 0),
+                'fit' => ($field['fit'] ?? 'grow') === 'shrink' ? 'shrink' : 'grow',
+                'uppercase' => (bool) ($field['uppercase'] ?? false),
             ];
         }
 

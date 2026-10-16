@@ -35,7 +35,7 @@ class ReEnrollmentApplicationController extends Controller implements HasMiddlew
     {
         $query = $period->applications()
             ->with([
-                'student.profile:id,first_name,last_name',
+                'student.profile:id,first_name,last_name,second_last_name',
                 'enrollment.classGroup.gradeLevel:id,name',
             ]);
 
@@ -227,7 +227,7 @@ class ReEnrollmentApplicationController extends Controller implements HasMiddlew
             'id' => $app->id,
             'enrollment_id' => $app->enrollment_id,
             'student_id' => $app->student_id,
-            'student_name' => trim(($profile?->first_name ?? '') . ' ' . ($profile?->last_name ?? '')),
+            'student_name' => $profile?->fullName() ?? '',
             'grade' => $enrollment?->classGroup?->gradeLevel?->name,
             'group' => $enrollment?->classGroup?->name,
             'status' => $app->status instanceof \BackedEnum ? $app->status->value : $app->status,

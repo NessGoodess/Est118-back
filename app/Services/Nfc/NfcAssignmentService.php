@@ -262,7 +262,7 @@ class NfcAssignmentService
         return [
             'job_id' => $job->uuid,
             'student_id' => $job->student_id,
-            'student_name' => trim(((string) ($profile->first_name ?? '')).' '.((string) ($profile->last_name ?? ''))),
+            'student_name' => $profile?->fullName() ?? '',
             'action' => $job->action,
             'status' => $job->status,
             'status_message' => $job->status_message,
@@ -437,7 +437,7 @@ class NfcAssignmentService
         }
 
         $profile = $student->profile;
-        $name = trim(((string) ($profile->first_name ?? '')).' '.((string) ($profile->last_name ?? '')));
+        $name = $profile?->fullName() ?? '';
         if ($name === '') {
             $name = 'Alumno';
         }

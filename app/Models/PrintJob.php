@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use App\Enums\PrintJobStatus;
+use App\Models\Concerns\HasCredentialHolder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
 class PrintJob extends Model
 {
+    use HasCredentialHolder;
+
     protected $fillable = [
         'uuid',
         'student_id',

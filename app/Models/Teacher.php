@@ -17,6 +17,8 @@ class Teacher extends Model
         'profile_id',
         'employee',
         'classroom',
+        'position',
+        'department',
         'status',
     ];
 

@@ -29,6 +29,8 @@ class TeacherDetailResource extends JsonResource
             'job' => [
                 'employee' => $teacher->employee,
                 'classroom' => $teacher->classroom,
+                'position' => $teacher->position,
+                'department' => $teacher->department,
                 'status' => $teacher->status instanceof \BackedEnum ? $teacher->status->value : $teacher->status,
             ],
             'classes' => TeacherClassOptionResource::collection($teacher->schoolClasses ?? [])->resolve(),

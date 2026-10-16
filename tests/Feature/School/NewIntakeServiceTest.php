@@ -62,6 +62,13 @@ class NewIntakeServiceTest extends TestCase
         );
         $this->assertSame(0, PreEnrollment::query()->count());
 
+        $student = Student::query()->with(['profile', 'guardians.profile'])->find($studentId);
+        $this->assertSame('LOPEZ', $student->profile->last_name);
+        $this->assertSame('RUIZ', $student->profile->second_last_name);
+        $guardianProfile = $student->guardians->first()?->profile;
+        $this->assertSame('RUIZ', $guardianProfile?->last_name);
+        $this->assertSame('DIAZ', $guardianProfile?->second_last_name);
+
         $this->postJson('/api/new-intakes', $this->payload($second->id, $group->id, $workshop->id))
             ->assertStatus(422);
     }

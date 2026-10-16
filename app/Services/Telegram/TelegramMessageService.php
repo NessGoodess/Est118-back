@@ -66,8 +66,8 @@ class TelegramMessageService
             $isRegistered = $guardian->telegram_id && $guardian->telegram_id !== $chatId;
             $keyboard[] = [[
                 'text' => $isRegistered
-                    ? Emojis::X_BUTTON . "{$guardian->profile->first_name} {$guardian->profile->last_name} (Ya registrado)"
-                    : Emojis::CHECK_MARK_BUTTON . " Soy {$guardian->profile->first_name} {$guardian->profile->last_name}",
+                    ? Emojis::X_BUTTON . "{$guardian->profile->fullName()} (Ya registrado)"
+                    : Emojis::CHECK_MARK_BUTTON . " Soy {$guardian->profile->fullName()}",
                 'callback_data' => $isRegistered
                     ? 'guardian_registered'
                     : "select_guardian:{$guardian->id}"
@@ -75,14 +75,14 @@ class TelegramMessageService
         }
 
         $text = Emojis::CHECK_MARK_BUTTON . " *Estudiante encontrado*\n\n" .
-            Emojis::MAN_STUDENT . " Alumno: {$student->first_name} {$student->last_name}\n" .
+            Emojis::MAN_STUDENT . " Alumno: {$student->fullName()}\n" .
             $gradeInfo . "\n" .
             "Seleccione su relación con el estudiante:";
 
         if (count($relatedStudents) > 0) {
             $text .= "\n\n_" . Emojis::INFORMATION_BUTTON . " También se vinculará automáticamente con:_\n";
             foreach ($relatedStudents as $s) {
-                $text .= "• {$s->profile->first_name} {$s->profile->last_name}\n";
+                $text .= "• {$s->profile->fullName()}\n";
             }
         }
 
@@ -101,13 +101,13 @@ class TelegramMessageService
         array $relatedStudents
     ): void {
         $text =
-            Emojis::MAN_STUDENT . " Alumno: {$student->first_name} {$student->last_name}\n" .
+            Emojis::MAN_STUDENT . " Alumno: {$student->fullName()}\n" .
             Emojis::BOOK . " Grado: {$session->grade} {$session->group}\n\n";
 
         if (count($relatedStudents)) {
             $text .= Emojis::FAMILY . " También encontramos otros alumnos asociados:\n";
             foreach ($relatedStudents as $s) {
-                $text .= "• {$s->profile->first_name} {$s->profile->last_name}\n";
+                $text .= "• {$s->profile->fullName()}\n";
             }
             $text .= "\n" . Emojis::INFORMATION_BUTTON . " No es necesario hacer otro registro.";
         } else {
@@ -130,7 +130,7 @@ class TelegramMessageService
         Telegram::sendMessage([
             'chat_id' => $chatId,
             'text' =>
-            Emojis::INFORMATION_BUTTON . "El alumno {$student->first_name} {$student->last_name} " .
+            Emojis::INFORMATION_BUTTON . "El alumno {$student->fullName()} " .
                 "ya está vinculado a una cuenta de Telegram.\n\n" .
                 "Si desea registrar otro alumno, use " . Emojis::PLUS_BUTTON . " Nuevo registro."
         ]);
@@ -207,7 +207,7 @@ class TelegramMessageService
     public function registrationSuccess(int $chatId, $guardian): void
     {
         $students = $guardian->students;
-        $studentList = $students->map(fn($s) => "• {$s->profile->first_name} {$s->profile->last_name}")->join("\n");
+        $studentList = $students->map(fn($s) => "• {$s->profile->fullName()}")->join("\n");
 
         $keyboard = [
             [['text' => Emojis::PLUS_BUTTON . ' Agregar otro estudiante', 'callback_data' => 'add_another']],

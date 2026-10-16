@@ -29,6 +29,8 @@ class UpdateTeacherRequest extends FormRequest
             'job' => ['sometimes', 'array'],
             'job.employee' => ['sometimes', 'nullable', 'string', 'max:100'],
             'job.classroom' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'job.position' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'job.department' => ['sometimes', 'nullable', 'string', 'max:100'],
             'job.status' => ['sometimes', Rule::enum(TeacherStatus::class)],
         ];
     }

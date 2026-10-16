@@ -81,7 +81,8 @@ class PrintJobController extends Controller
         );
 
         $paginator->getCollection()->load([
-            'student.profile:id,first_name,last_name',
+            'student.profile:id,first_name,last_name,second_last_name',
+            'profile:id,first_name,last_name,second_last_name',
             'creator:id,name',
             'canceller:id,name',
             'credentialPrint',
@@ -166,7 +167,7 @@ class PrintJobController extends Controller
         $data = $request->validated();
         $rows = $this->printJobs->resolveDesigns(
             $data['student_ids'],
-            $data['template_key'] ?? 'student-card-v1'
+            $data['template_key'] ?? null
         );
 
         return response()->json([
@@ -231,7 +232,7 @@ class PrintJobController extends Controller
     {
         return response()->json([
             'success' => true,
-            'data' => $this->serialize($printJob->load('student.profile')),
+            'data' => $this->serialize($printJob->load(['student.profile', 'profile'])),
         ]);
     }
 
@@ -304,7 +305,8 @@ class PrintJobController extends Controller
     private function serialize(PrintJob $job): array
     {
         $job->loadMissing([
-            'student.profile:id,first_name,last_name',
+            'student.profile:id,first_name,last_name,second_last_name',
+            'profile:id,first_name,last_name,second_last_name',
             'creator:id,name',
             'canceller:id,name',
             'credentialPrint',

@@ -17,6 +17,7 @@ protected $fillable = [
         'national_id',
         'first_name',
         'last_name',
+        'second_last_name',
         'birth_date',
         'email',
         'phone_number',
@@ -29,6 +30,17 @@ protected $fillable = [
     public function setNationalIdAttribute(?string $value): void
     {
         $this->attributes['national_id'] = $value === null ? null : strtoupper(trim($value));
+    }
+
+    /** Paternal + maternal surname. Older rows hold both inside last_name. */
+    public function fullLastName(): string
+    {
+        return trim(($this->last_name ?? '').' '.($this->second_last_name ?? ''));
+    }
+
+    public function fullName(): string
+    {
+        return trim(($this->first_name ?? '').' '.$this->fullLastName());
     }
 
     /**

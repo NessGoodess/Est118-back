@@ -271,10 +271,7 @@ class NfcAttendanceService
     {
         $grade = $enrollment->classGroup?->gradeLevel?->name;
         $group = $enrollment->classGroup?->name;
-        $name = trim(
-            ($enrollment->student->profile?->first_name ?? '').' '.
-                ($enrollment->student->profile?->last_name ?? '')
-        );
+        $name = $enrollment->student->profile?->fullName() ?? '';
 
         return [
             'id' => $enrollment->student->id,

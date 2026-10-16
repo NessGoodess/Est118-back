@@ -26,6 +26,8 @@ class StoreTeacherRequest extends FormRequest
             ...$this->addressRules(),
             'employee' => ['nullable', 'string', 'max:100'],
             'classroom' => ['nullable', 'string', 'max:100'],
+            'position' => ['nullable', 'string', 'max:100'],
+            'department' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', Rule::enum(TeacherStatus::class)],
             'class_ids' => ['nullable', 'array'],
             'class_ids.*' => ['integer', 'exists:school_classes,id'],

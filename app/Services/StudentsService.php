@@ -3,12 +3,15 @@
 namespace App\Services;
 
 use App\Models\AcademicYear;
-use App\Models\Address;
 use App\Models\Guardian;
 use App\Models\Student;
+use App\Services\People\PersonAddressService;
+use App\Services\People\PersonProfileService;
 use App\Support\Curp;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class StudentsService
@@ -51,26 +54,22 @@ class StudentsService
             throw new RuntimeException('El alumno no tiene perfil asociado.');
         }
 
-        if (! empty($data['profile']) && is_array($data['profile'])) {
-            $profile->fill($data['profile']);
-            $profile->save();
-        }
+        DB::transaction(function () use ($profile, $data) {
+            if (! empty($data['profile']) && is_array($data['profile'])) {
+                $personal = $data['profile'];
+                app(PersonProfileService::class)->update($profile, Arr::except($personal, ['phone_second_number']));
 
-        if (array_key_exists('address', $data) && is_array($data['address'])) {
-            $addressPayload = $data['address'];
-            if (array_key_exists('apartament_number', $addressPayload) && ! array_key_exists('unit_number', $addressPayload)) {
-                $addressPayload['unit_number'] = $addressPayload['apartament_number'];
+                // Only students keep a second phone, so the shared person service does not know it.
+                if (array_key_exists('phone_second_number', $personal)) {
+                    $profile->phone_second_number = ($personal['phone_second_number'] ?? null) ?: null;
+                    $profile->save();
+                }
             }
-            unset($addressPayload['apartament_number']);
-            if ($profile->address) {
-                $profile->address->fill($addressPayload);
-                $profile->address->save();
-            } else {
-                $address = Address::create($addressPayload);
-                $profile->address_id = $address->id;
-                $profile->save();
+
+            if (! empty($data['address']) && is_array($data['address'])) {
+                app(PersonAddressService::class)->upsertFor($profile, $data['address']);
             }
-        }
+        });
 
         return $this->findForDetail($student->id);
     }
@@ -99,7 +98,9 @@ class StudentsService
 
         $profile->fill([
             'first_name' => trim($data['first_name']),
+            // The guardian form edits all surnames in one field.
             'last_name' => trim($data['last_name']),
+            'second_last_name' => null,
             'email' => $data['email'] ?? null,
             'phone_number' => $data['phone'] ?? null,
             'national_id' => $curp === '' ? null : $curp,
@@ -119,7 +120,7 @@ class StudentsService
     public function listIndex(): Collection
     {
         return Student::with([
-            'profile:id,first_name,last_name,profile_picture,updated_at',
+            'profile:id,first_name,last_name,second_last_name,profile_picture,updated_at',
             'enrollments' => fn ($q) => $q->whereIn('status', ['active', 'pre_enrolled'])->with([
                 'classGroup:id,name,grade_level_id,academic_year_id',
                 'classGroup.gradeLevel:id,name',
@@ -192,7 +193,7 @@ class StudentsService
     public function photoStatusPayload(int $studentId): array
     {
         $student = Student::with([
-            'profile:id,first_name,last_name,profile_picture,updated_at',
+            'profile:id,first_name,last_name,second_last_name,profile_picture,updated_at',
             'currentEnrollment.classGroup.gradeLevel:id,name',
             'currentEnrollment.classGroup:id,name,grade_level_id',
         ])->findOrFail($studentId);
@@ -203,7 +204,7 @@ class StudentsService
 
         return [
             'student_id' => $student->id,
-            'student_name' => trim(($student->profile?->first_name ?? '') . ' ' . ($student->profile?->last_name ?? '')),
+            'student_name' => $student->profile?->fullName() ?? '',
             'has_photo' => $hasPhoto,
             'action_label' => $hasPhoto ? 'Renovar' : 'Capturar',
             'photo_url' => $hasPhoto

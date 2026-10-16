@@ -123,11 +123,11 @@ class NewIntakeService
                 'state' => $data['state'],
             ]);
 
-            $lastName = trim($data['last_name'].' '.($data['second_last_name'] ?? ''));
             $profile = Profile::query()->create([
                 'national_id' => $curp,
                 'first_name' => $data['first_name'],
-                'last_name' => $lastName,
+                'last_name' => trim($data['last_name']),
+                'second_last_name' => trim((string) ($data['second_last_name'] ?? '')) ?: null,
                 'birth_date' => $data['birth_date'],
                 'gender' => $data['gender'],
                 'email' => ($data['email'] ?? null) ?: null,
@@ -144,10 +144,10 @@ class NewIntakeService
             ]);
             $this->linkSiblings($student, $data['sibling_ids'] ?? []);
 
-            $guardianLast = trim($data['guardian_last_name'].' '.($data['guardian_second_last_name'] ?? ''));
             $guardianAttributes = [
                 'first_name' => $data['guardian_first_name'],
-                'last_name' => $guardianLast,
+                'last_name' => trim($data['guardian_last_name']),
+                'second_last_name' => trim((string) ($data['guardian_second_last_name'] ?? '')) ?: null,
                 'birth_date' => $data['guardian_birth_date'] ?? null,
                 'gender' => $data['guardian_gender'] ?? 'O',
                 'phone_number' => $data['guardian_phone'],
@@ -189,7 +189,7 @@ class NewIntakeService
             return [
                 'student_id' => $student->id,
                 'enrollment_id' => $enrollment->id,
-                'name' => trim($profile->first_name.' '.$profile->last_name),
+                'name' => $profile->fullName(),
                 'grade' => $grade->name,
                 'group' => $group->name,
                 'workshop' => $workshop->name,
@@ -234,6 +234,7 @@ class NewIntakeService
             ->whereHas('profile', function (Builder $query) use ($like) {
                 $query->where('first_name', 'like', $like)
                     ->orWhere('last_name', 'like', $like)
+                    ->orWhere('second_last_name', 'like', $like)
                     ->orWhere('national_id', 'like', $like);
             })
             ->limit(8)
@@ -244,7 +245,7 @@ class NewIntakeService
 
                 return [
                     'id' => $student->id,
-                    'name' => trim(($profile->first_name ?? '').' '.($profile->last_name ?? '')),
+                    'name' => $profile->fullName(),
                     'curp' => strtoupper(trim((string) ($profile->national_id ?? ''))),
                     'grade' => (string) ($enrollment?->classGroup?->gradeLevel?->name ?? ''),
                     'group' => (string) ($enrollment?->classGroup?->name ?? ''),

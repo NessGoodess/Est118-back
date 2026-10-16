@@ -52,9 +52,7 @@ class DailyGeneralAttendanceService
             return [
                 'student_id' => $student->id,
                 'credential_id' => $student->credential_id,
-                'name' => trim(
-                    ($student->profile?->first_name ?? '').' '.($student->profile?->last_name ?? '')
-                ),
+                'name' => $student->profile?->fullName() ?? '',
                 'photo_url' => $this->photoPathService->signedUrl($student, 'profile'),
                 'gender' => $student->profile?->gender,
                 'grade' => $enrollment->classGroup?->gradeLevel?->name,
@@ -193,13 +191,13 @@ class DailyGeneralAttendanceService
             ->where('status', EnrollmentStatus::Active)
             ->with([
                 'student:id,credential_id,profile_id',
-                'student.profile:id,first_name,last_name,profile_picture,gender,updated_at',
+                'student.profile:id,first_name,last_name,second_last_name,profile_picture,gender,updated_at',
                 'classGroup:id,name,grade_level_id',
                 'classGroup.gradeLevel:id,name',
             ])
             ->get()
             ->sortBy(fn (Enrollment $e) => mb_strtolower(trim(
-                ($e->student?->profile?->last_name ?? '').' '.($e->student?->profile?->first_name ?? '')
+                ($e->student?->profile?->fullLastName() ?? '').' '.($e->student?->profile?->first_name ?? '')
             )))
             ->values();
     }

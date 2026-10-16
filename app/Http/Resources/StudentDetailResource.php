@@ -2,7 +2,9 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\PersonPhotoKind;
 use App\Models\Guardian;
+use App\Services\People\PersonPhotoPathService;
 use App\Services\StudentPhotoPathService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -35,11 +37,12 @@ class StudentDetailResource extends JsonResource
             'student_info' => [
                 'id' => $student->id,
                 'credential_id' => $student->credential_id,
-                'full_name' => trim(($profile?->first_name ?? '') . ' ' . ($profile?->last_name ?? '')),
+                'full_name' => $profile?->fullName() ?? '',
                 'first_name' => $profile?->first_name,
                 'last_name' => $profile?->last_name,
+                'second_last_name' => $profile?->second_last_name,
                 /** @compat legacy campo name */
-                'name' => trim(($profile?->first_name ?? '') . ' ' . ($profile?->last_name ?? '')),
+                'name' => $profile?->fullName() ?? '',
                 'national_id' => $profile?->national_id,
                 'birth_date' => $profile?->birth_date,
                 'gender' => $profile?->gender,
@@ -145,9 +148,9 @@ class StudentDetailResource extends JsonResource
 
         return [
             'id' => $guardian->id,
-            'name' => trim(($profile?->first_name ?? '').' '.($profile?->last_name ?? '')),
+            'name' => $profile?->fullName() ?? '',
             'first_name' => $profile?->first_name,
-            'last_name' => $profile?->last_name,
+            'last_name' => $profile?->fullLastName(),
             'national_id' => $profile?->national_id,
             'relationship' => $guardian->pivot->relationship,
             'email' => $profile?->email,
@@ -156,6 +159,7 @@ class StudentDetailResource extends JsonResource
             'birth_year' => $birth?->year,
             'gender' => $profile?->gender,
             'age' => $birth?->age,
+            'photos' => app(PersonPhotoPathService::class)->currentUrls(PersonPhotoKind::Guardians, $guardian->id),
         ];
     }
 

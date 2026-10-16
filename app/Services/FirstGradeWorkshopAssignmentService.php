@@ -123,10 +123,7 @@ class FirstGradeWorkshopAssignmentService
             return [
                 'enrollment_id' => $enrollment->id,
                 'student_id' => $enrollment->student_id,
-                'student_name' => trim(
-                    ($enrollment->student?->profile?->first_name ?? '').' '.
-                    ($enrollment->student?->profile?->last_name ?? '')
-                ),
+                'student_name' => $enrollment->student?->profile?->fullName() ?? '',
                 'class_group_name' => $enrollment->classGroup?->name,
                 'first_choice' => $pre?->workshop_first_choice,
                 'second_choice' => $pre?->workshop_second_choice,

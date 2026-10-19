@@ -609,6 +609,10 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
     Route::patch('/{student}', [StudentController::class, 'update'])
         ->middleware('permission:edit students');
 
+    Route::post('/{student}/guardians', [StudentController::class, 'storeGuardian'])
+        ->whereNumber('student')
+        ->middleware('permission:edit students');
+
     Route::patch('/{student}/guardians/{guardian}', [StudentController::class, 'updateGuardian'])
         ->whereNumber('student')
         ->whereNumber('guardian')

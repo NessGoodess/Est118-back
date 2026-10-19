@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AcademicYear;
 use App\Models\Guardian;
+use App\Models\Profile;
 use App\Models\Student;
 use App\Services\People\PersonAddressService;
 use App\Services\People\PersonProfileService;
@@ -72,6 +73,75 @@ class StudentsService
         });
 
         return $this->findForDetail($student->id);
+    }
+
+    /**
+     * Create or reuse a guardian profile and link it to this student.
+     *
+     * @param  array{
+     *   first_name: string,
+     *   last_name: string,
+     *   second_last_name?: string|null,
+     *   curp?: string|null,
+     *   birth_date?: string|null,
+     *   gender?: string|null,
+     *   phone: string,
+     *   email: string,
+     *   relationship: string,
+     *   address_mode: 'student'|'new',
+     *   address?: array<string, mixed>
+     * }  $data
+     */
+    public function storeGuardian(Student $student, array $data): Student
+    {
+        return DB::transaction(function () use ($student, $data) {
+            $student->loadMissing('profile');
+            $studentProfile = $student->profile;
+            if (! $studentProfile) {
+                throw new RuntimeException('El alumno no tiene perfil asociado.');
+            }
+
+            $curp = Curp::normalize($data['curp'] ?? null);
+            $attributes = [
+                'first_name' => trim($data['first_name']),
+                'last_name' => trim($data['last_name']),
+                'second_last_name' => trim((string) ($data['second_last_name'] ?? '')) ?: null,
+                'birth_date' => $data['birth_date'] ?? null,
+                'gender' => $data['gender'] ?? 'O',
+                'phone_number' => ($data['phone'] ?? null) ?: null,
+                'email' => ($data['email'] ?? null) ?: null,
+            ];
+
+            // Without a CURP there is no safe key to match an existing person.
+            $guardianProfile = $curp !== ''
+                ? Profile::query()->firstOrCreate(['national_id' => $curp], $attributes)
+                : Profile::query()->create([...$attributes, 'national_id' => null]);
+
+            $relationship = trim($data['relationship']);
+            $guardian = Guardian::query()->firstOrCreate(
+                ['profile_id' => $guardianProfile->id],
+                ['Kinship' => $relationship]
+            );
+
+            $student->guardians()->syncWithoutDetaching([
+                $guardian->id => ['relationship' => $relationship],
+            ]);
+
+            if (($data['address_mode'] ?? '') === 'student') {
+                if (! $studentProfile->address_id) {
+                    throw new RuntimeException('El alumno no tiene domicilio capturado.');
+                }
+                $guardianProfile->address_id = $studentProfile->address_id;
+                $guardianProfile->save();
+            } else {
+                app(PersonAddressService::class)->upsertFor(
+                    $guardianProfile,
+                    is_array($data['address'] ?? null) ? $data['address'] : []
+                );
+            }
+
+            return $this->findForDetail($student->id);
+        });
     }
 
     /**

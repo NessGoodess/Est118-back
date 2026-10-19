@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
+use App\Http\Requests\StoreStudentGuardianRequest;
 use App\Http\Requests\UpdateStudentGuardianRequest;
 use App\Http\Requests\UpdateStudentRequest;
 use App\Http\Resources\StudentDetailResource;
@@ -81,6 +82,26 @@ class StudentController extends Controller
             'success' => true,
             'data' => (new StudentDetailResource($updated))->resolve(),
         ]);
+    }
+
+    /**
+     * Create or link a guardian to this student (personal data + address).
+     */
+    public function storeGuardian(StoreStudentGuardianRequest $request, Student $student): JsonResponse
+    {
+        try {
+            $updated = $this->studentsService->storeGuardian($student, $request->validated());
+        } catch (RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => (new StudentDetailResource($updated))->resolve(),
+        ], 201);
     }
 
     /**

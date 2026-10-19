@@ -563,6 +563,9 @@ Route::prefix('export-templates')->middleware(['auth:sanctum', 'verified', 'perm
  */
 Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(function () {
 
+    Route::get('/list', [StudentController::class, 'listByContext'])
+        ->middleware('permission:view students');
+
     Route::get('/grades', [GradeLevelController::class, 'index'])
         ->middleware('permission:view students');
 

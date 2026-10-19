@@ -8,8 +8,10 @@ use App\Http\Requests\UpdateStudentRequest;
 use App\Http\Resources\StudentDetailResource;
 use App\Http\Resources\StudentListItemResource;
 use App\Models\AcademicYear;
+use App\Models\ClassGroup;
 use App\Models\Guardian;
 use App\Models\Student;
+use App\Services\CredentialPrintingService;
 use App\Services\StudentPhotoPathService;
 use App\Services\StudentPhotoService;
 use App\Services\StudentsService;
@@ -25,6 +27,7 @@ class StudentController extends Controller
     public function __construct(
         protected StudentsService $studentsService,
         protected StudentPhotoService $studentPhotoService,
+        protected CredentialPrintingService $credentialPrintingService,
     ) {}
 
     /**
@@ -114,6 +117,81 @@ class StudentController extends Controller
         return response()->json([
             'success' => true,
             'data' => $years,
+        ]);
+    }
+
+    /**
+     * Unified student list by context (directory | credentials).
+     * Feature projections on the frontend pass context; this does not grow with UI cases beyond the whitelist.
+     * Spanish: Lista de estudiantes unificada por contexto (directorio | credenciales).
+     */
+    public function listByContext(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'context' => ['required', 'string', Rule::in(['directory', 'credentials'])],
+            'grade_id' => ['nullable', 'integer', 'exists:grade_levels,id'],
+            'class_group_id' => ['nullable', 'integer', 'exists:class_groups,id'],
+            'academic_year_id' => ['nullable', 'integer', 'exists:academic_years,id'],
+            'status' => ['nullable', 'array'],
+            'status.*' => ['string', Rule::enum(EnrollmentStatus::class)],
+        ]);
+
+        $context = $validated['context'];
+
+        if ($context === 'credentials') {
+            $classGroupId = isset($validated['class_group_id']) ? (int) $validated['class_group_id'] : null;
+            if ($classGroupId === null) {
+                return response()->json([
+                    'success' => true,
+                    'data' => ['rows' => [], 'meta' => null],
+                ]);
+            }
+
+            $classGroup = ClassGroup::query()->findOrFail($classGroupId);
+            $payload = $this->credentialPrintingService->rowsForClassGroup($classGroup);
+
+            return response()->json([
+                'success' => true,
+                'data' => $payload,
+            ]);
+        }
+
+        // directory
+        $gradeId = isset($validated['grade_id']) ? (int) $validated['grade_id'] : null;
+        if ($gradeId === null) {
+            return response()->json([
+                'success' => true,
+                'data' => ['rows' => [], 'meta' => null],
+            ]);
+        }
+
+        $yearId = $this->studentsService->resolveYearId(
+            isset($validated['academic_year_id']) ? (int) $validated['academic_year_id'] : null
+        );
+
+        if ($yearId === null) {
+            return response()->json([
+                'success' => true,
+                'data' => ['rows' => [], 'meta' => ['academic_year_id' => null]],
+            ]);
+        }
+
+        $statuses = $validated['status'] ?? null;
+        if ($statuses === []) {
+            $statuses = null;
+        }
+
+        $students = $this->studentsService->listByGrade($gradeId, $yearId, $statuses);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'rows' => StudentListItemResource::collection($students)->resolve(),
+                'meta' => [
+                    'grade_id' => $gradeId,
+                    'academic_year_id' => $yearId,
+                ],
+            ],
         ]);
     }
 

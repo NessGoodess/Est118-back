@@ -110,6 +110,36 @@ class StoreStudentGuardianTest extends TestCase
             ->assertJsonPath('message', 'El alumno no tiene domicilio capturado.');
     }
 
+    public function test_creates_guardian_with_only_required_names(): void
+    {
+        $this->actingEditor();
+        $address = Address::query()->create([
+            'street_type' => 'Calle',
+            'street_name' => 'Independencia',
+            'house_number' => '10',
+            'neighborhood_type' => 'Colonia',
+            'neighborhood_name' => 'Centro',
+            'postal_code' => '68000',
+            'city' => 'Oaxaca',
+            'state' => 'Oaxaca',
+        ]);
+        $student = $this->student($address->id);
+
+        $this->postJson("/api/students/{$student->id}/guardians", [
+            'first_name' => 'Rosa',
+            'last_name' => 'López',
+            'address_mode' => 'student',
+        ])->assertCreated()
+            ->assertJsonPath('data.guardians.0.first_name', 'Rosa')
+            ->assertJsonPath('data.guardians.0.relationship', null);
+
+        $guardian = $student->fresh()->guardians()->first();
+        $this->assertNotNull($guardian);
+        $this->assertNull($guardian->profile->national_id);
+        $this->assertNull($guardian->profile->phone_number);
+        $this->assertNull($guardian->profile->email);
+    }
+
     private function student(?int $addressId = null): Student
     {
         $profile = Profile::query()->create([

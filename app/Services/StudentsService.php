@@ -85,9 +85,9 @@ class StudentsService
      *   curp?: string|null,
      *   birth_date?: string|null,
      *   gender?: string|null,
-     *   phone: string,
-     *   email: string,
-     *   relationship: string,
+     *   phone?: string|null,
+     *   email?: string|null,
+     *   relationship?: string|null,
      *   address_mode: 'student'|'new',
      *   address?: array<string, mixed>
      * }  $data
@@ -107,7 +107,7 @@ class StudentsService
                 'last_name' => trim($data['last_name']),
                 'second_last_name' => trim((string) ($data['second_last_name'] ?? '')) ?: null,
                 'birth_date' => $data['birth_date'] ?? null,
-                'gender' => $data['gender'] ?? 'O',
+                'gender' => ($data['gender'] ?? null) ?: null,
                 'phone_number' => ($data['phone'] ?? null) ?: null,
                 'email' => ($data['email'] ?? null) ?: null,
             ];
@@ -117,7 +117,8 @@ class StudentsService
                 ? Profile::query()->firstOrCreate(['national_id' => $curp], $attributes)
                 : Profile::query()->create([...$attributes, 'national_id' => null]);
 
-            $relationship = trim($data['relationship']);
+            $relationship = trim((string) ($data['relationship'] ?? ''));
+            $relationship = $relationship === '' ? null : $relationship;
             $guardian = Guardian::query()->firstOrCreate(
                 ['profile_id' => $guardianProfile->id],
                 ['Kinship' => $relationship]

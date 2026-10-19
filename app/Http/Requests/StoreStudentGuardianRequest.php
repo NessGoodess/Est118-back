@@ -19,13 +19,20 @@ class StoreStudentGuardianRequest extends FormRequest
     {
         $this->uppercaseFields(['curp']);
 
-        $curp = trim((string) $this->input('curp', ''));
-        if ($curp === '') {
-            $this->merge(['curp' => null]);
+        $merged = [];
+        foreach (['curp', 'phone', 'email', 'relationship', 'birth_date', 'second_last_name', 'gender'] as $field) {
+            if (! $this->filled($field)) {
+                $merged[$field] = null;
+            }
+        }
+        if ($merged !== []) {
+            $this->merge($merged);
         }
     }
 
     /**
+     * Only first and last name are required; the rest matches nullable profile columns.
+     *
      * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
      */
     public function rules(): array
@@ -33,11 +40,15 @@ class StoreStudentGuardianRequest extends FormRequest
         $needsAddress = $this->input('address_mode') === 'new';
 
         return [
-            ...$this->personRules(),
+            'first_name' => ['required', 'string', 'min:2', 'max:50'],
+            'last_name' => ['required', 'string', 'min:2', 'max:50'],
+            'second_last_name' => ['nullable', 'string', 'max:50'],
             'curp' => ['nullable', 'string', 'size:18', 'regex:/^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9]{2}$/'],
-            'phone' => ['required', 'digits:10'],
-            'email' => ['required', 'email', 'max:255'],
-            'relationship' => ['required', 'string', 'min:2', 'max:50'],
+            'birth_date' => ['nullable', 'date'],
+            'gender' => ['nullable', 'in:M,F,O'],
+            'phone' => ['nullable', 'digits:10'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'relationship' => ['nullable', 'string', 'min:2', 'max:50'],
             'address_mode' => ['required', Rule::in(['student', 'new'])],
             ...$this->addressRules('address', $needsAddress),
         ];
@@ -49,11 +60,10 @@ class StoreStudentGuardianRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'first_name.required' => 'El nombre del tutor es requerido.',
+            'last_name.required' => 'El apellido paterno del tutor es requerido.',
             'curp.regex' => 'La CURP del tutor no es válida.',
             'curp.size' => 'La CURP del tutor debe tener 18 caracteres.',
-            'phone.required' => 'El teléfono del tutor es requerido.',
-            'email.required' => 'El correo del tutor es requerido.',
-            'relationship.required' => 'El parentesco es requerido.',
             'address_mode.in' => 'Selecciona un domicilio válido.',
         ];
     }

@@ -42,6 +42,17 @@ class PreEnrollmentDetailResource extends JsonResource
             'admission_exam_score' => $this->admission_exam_score,
             'has_siblings' => $this->has_siblings,
             'siblings_details' => $this->siblings_details,
+            'sibling_hint_last_name' => $this->sibling_hint_last_name,
+            'sibling_hint_second_last_name' => $this->sibling_hint_second_last_name,
+            'sibling_hint_first_name' => $this->sibling_hint_first_name,
+            'sibling_hint_grade' => $this->sibling_hint_grade,
+            'sibling_hint_group' => $this->sibling_hint_group,
+            'sibling_student_ids' => $this->sibling_student_ids ?? [],
+            'guardian_match' => $this->when(
+                $request->user() !== null,
+                fn () => app(\App\Services\StudentFamilyService::class)
+                    ->lookupPersonByCurp($this->guardian_curp)
+            ),
             'street_type' => $this->street_type,
             'street_name' => $this->street_name,
             'house_number' => $this->house_number,

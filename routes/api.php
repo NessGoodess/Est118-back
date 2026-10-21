@@ -313,6 +313,9 @@ Route::prefix('admissions')->group(function () {
     // public routes
     Route::get('/status', [AdmissionCycleController::class, 'status']);
 
+    Route::get('/sibling-placement-options', [PreEnrollmentController::class, 'siblingPlacementOptions'])
+        ->middleware('throttle:30,1');
+
     Route::post('/pre-enrollment', [PreEnrollmentController::class, 'store'])
         ->middleware(['throttle:5,1', 'admissions.active']);
 
@@ -336,6 +339,7 @@ Route::prefix('admissions')->group(function () {
         Route::post('/bulk-initial-review', [PreEnrollmentController::class, 'bulkInitialReview']);
         Route::get('/{preEnrollment}', [PreEnrollmentController::class, 'show']);
         Route::patch('/{preEnrollment}', [PreEnrollmentController::class, 'update']);
+        Route::put('/{preEnrollment}/siblings', [PreEnrollmentController::class, 'linkSiblings']);
         Route::patch('/{preEnrollment}/process', [PreEnrollmentController::class, 'updateProcess']);
         Route::post('/{preEnrollment}/initial-review', [PreEnrollmentController::class, 'initialReview']);
         Route::post('/{preEnrollment}/convert-student', [PreEnrollmentController::class, 'convertToStudent'])
@@ -572,6 +576,9 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
     Route::get('/academic-years', [StudentController::class, 'academicYears'])
         ->middleware('permission:view students');
 
+    Route::get('/search', [StudentController::class, 'search'])
+        ->middleware('permission:edit students|edit pre-enrollments|edit admission enrollment');
+
     Route::get('/grades/{grade_id}', [StudentController::class, 'getStudentsByGrade']);
 
     Route::post('/export-with-template', [StudentExportController::class, 'exportWithTemplate'])
@@ -609,7 +616,32 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
     Route::patch('/{student}', [StudentController::class, 'update'])
         ->middleware('permission:edit students');
 
+    Route::get('/{student}/siblings', [StudentController::class, 'siblings'])
+        ->whereNumber('student')
+        ->middleware('permission:view students');
+
+    Route::post('/{student}/siblings', [StudentController::class, 'storeSibling'])
+        ->whereNumber('student')
+        ->middleware('permission:edit students');
+
+    Route::delete('/{student}/siblings/{sibling}', [StudentController::class, 'destroySibling'])
+        ->whereNumber('student')
+        ->whereNumber('sibling')
+        ->middleware('permission:edit students');
+
+    Route::get('/{student}/sibling-guardians', [StudentController::class, 'siblingGuardians'])
+        ->whereNumber('student')
+        ->middleware('permission:view students');
+
     Route::post('/{student}/guardians', [StudentController::class, 'storeGuardian'])
+        ->whereNumber('student')
+        ->middleware('permission:edit students');
+
+    Route::post('/{student}/guardians/attach', [StudentController::class, 'attachGuardian'])
+        ->whereNumber('student')
+        ->middleware('permission:edit students');
+
+    Route::post('/{student}/guardians/merge-by-curp', [StudentController::class, 'mergeGuardian'])
         ->whereNumber('student')
         ->middleware('permission:edit students');
 

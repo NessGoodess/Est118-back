@@ -40,6 +40,8 @@ class StudentsService
             'enrollments.classGroup.schoolClasses.subject',
             'workshopEnrollments.workshop',
             'guardians.profile',
+            'siblings.profile',
+            'siblings.currentEnrollment.classGroup.gradeLevel',
         ])->findOrFail($id);
     }
 
@@ -150,42 +152,7 @@ class StudentsService
      */
     public function updateGuardian(Student $student, Guardian $guardian, array $data): Student
     {
-        $linked = $student->guardians()->whereKey($guardian->id)->exists();
-        if (! $linked) {
-            throw new RuntimeException('El tutor no está asociado a este alumno.');
-        }
-
-        $guardian->loadMissing('profile');
-        $profile = $guardian->profile;
-        if (! $profile) {
-            throw new RuntimeException('El tutor no tiene perfil asociado.');
-        }
-
-        $curp = Curp::normalize($data['national_id'] ?? null);
-        $derived = $curp === '' ? null : Curp::derive($curp);
-        if ($curp !== '' && $derived === null) {
-            throw new RuntimeException('La CURP del tutor no es válida.');
-        }
-
-        $profile->fill([
-            'first_name' => trim($data['first_name']),
-            // The guardian form edits all surnames in one field.
-            'last_name' => trim($data['last_name']),
-            'second_last_name' => null,
-            'email' => $data['email'] ?? null,
-            'phone_number' => $data['phone'] ?? null,
-            'national_id' => $curp === '' ? null : $curp,
-            'birth_date' => $derived['birth_date'] ?? null,
-            'gender' => $derived['gender'] ?? null,
-        ]);
-        $profile->save();
-
-        $relationship = trim((string) ($data['relationship'] ?? ''));
-        $student->guardians()->updateExistingPivot($guardian->id, [
-            'relationship' => $relationship === '' ? null : $relationship,
-        ]);
-
-        return $this->findForDetail($student->id);
+        return app(StudentFamilyService::class)->updateGuardianOrConflict($student, $guardian, $data);
     }
 
     public function listIndex(): Collection

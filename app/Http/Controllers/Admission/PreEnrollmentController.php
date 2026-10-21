@@ -8,12 +8,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\BulkInitialReviewPreEnrollmentRequest;
 use App\Http\Requests\ConvertPreEnrollmentToStudentRequest;
 use App\Http\Requests\InitialReviewPreEnrollmentRequest;
+use App\Http\Requests\LinkPreEnrollmentSiblingsRequest;
 use App\Http\Requests\StorePreEnrollmentRequest;
 use App\Http\Requests\UpdatePreEnrollmentProcessRequest;
 use App\Http\Requests\UpdatePreEnrollmentRequest;
 use App\Http\Resources\PreEnrollmentDetailResource;
 use App\Http\Resources\PreEnrollmentListResource;
+use App\Models\AcademicYear;
 use App\Models\Admission\AdmissionCycle;
+use App\Models\ClassGroup;
+use App\Models\GradeLevel;
 use App\Models\PreEnrollment;
 use App\Services\AdmissionIdempotencyService;
 use App\Services\ConvertPreEnrollmentToStudentService;
@@ -40,7 +44,7 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         return [
             new Middleware('permission:view pre-enrollments')->only(['index', 'show']),
             new Middleware('permission:create pre-enrollments')->only(['storeByAdmin']),
-            new Middleware('permission:edit pre-enrollments')->only(['update', 'resentPdfFolio']),
+            new Middleware('permission:edit pre-enrollments')->only(['update', 'linkSiblings', 'resentPdfFolio']),
             new Middleware('permission:delete pre-enrollments')->only(['destroy']),
             new Middleware('permission:edit admission enrollment')->only([
                 'updateProcess',
@@ -132,6 +136,48 @@ class PreEnrollmentController extends Controller implements HasMiddleware
     }
 
     /**
+     * Public catalog for sibling hint selects (grade/group names only — no students).
+     */
+    public function siblingPlacementOptions()
+    {
+        $year = AcademicYear::query()->where('is_active', true)->first()
+            ?? AcademicYear::query()->orderByDesc('starts_on')->orderByDesc('year_start')->first();
+
+        $grades = GradeLevel::query()
+            ->whereIn('name', ['1°', '2°', '3°'])
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $groups = [];
+        if ($year) {
+            $groups = ClassGroup::query()
+                ->where('academic_year_id', $year->id)
+                ->whereIn('grade_level_id', $grades->pluck('id'))
+                ->with('gradeLevel:id,name')
+                ->orderBy('name')
+                ->get(['id', 'name', 'grade_level_id'])
+                ->map(fn (ClassGroup $group) => [
+                    'id' => $group->id,
+                    'name' => $group->name,
+                    'grade' => $group->gradeLevel?->name,
+                ])
+                ->values()
+                ->all();
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'grades' => $grades->map(fn (GradeLevel $g) => [
+                    'id' => $g->id,
+                    'name' => $g->name,
+                ])->values()->all(),
+                'groups' => $groups,
+            ],
+        ]);
+    }
+
+    /**
      * Store a newly created pre-enrollment from the Admin panel.
      */
     public function storeByAdmin(StorePreEnrollmentRequest $request)
@@ -180,6 +226,27 @@ class PreEnrollmentController extends Controller implements HasMiddleware
         }
 
         $preEnrollment->update($request->validated());
+
+        return new PreEnrollmentDetailResource($preEnrollment->fresh());
+    }
+
+    /**
+     * Link enrolled students as siblings for later conversion.
+     */
+    public function linkSiblings(LinkPreEnrollmentSiblingsRequest $request, PreEnrollment $preEnrollment)
+    {
+        if ($preEnrollment->converted_student_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Esta solicitud ya fue inscrita y no se puede modificar.',
+            ], 422);
+        }
+
+        $ids = array_values(array_unique(array_map('intval', $request->validated('sibling_student_ids'))));
+        $preEnrollment->update([
+            'sibling_student_ids' => $ids,
+            'has_siblings' => $ids !== [] ? true : $preEnrollment->has_siblings,
+        ]);
 
         return new PreEnrollmentDetailResource($preEnrollment->fresh());
     }

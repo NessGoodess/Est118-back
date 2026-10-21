@@ -130,7 +130,12 @@ class PreEnrollmentService
             'previous_school' => $data['academicInfo']['previousSchool'],
             'current_average' => $data['academicInfo']['currentAverage'],
             'has_siblings' => $data['academicInfo']['hasSiblings'],
-            'siblings_details' => $data['academicInfo']['siblingsDetails'],
+            'sibling_hint_last_name' => $data['academicInfo']['siblingHintLastName'] ?? null,
+            'sibling_hint_second_last_name' => $data['academicInfo']['siblingHintSecondLastName'] ?? null,
+            'sibling_hint_first_name' => $data['academicInfo']['siblingHintFirstName'] ?? null,
+            'sibling_hint_grade' => $data['academicInfo']['siblingHintGrade'] ?? null,
+            'sibling_hint_group' => $data['academicInfo']['siblingHintGroup'] ?? null,
+            'siblings_details' => $this->buildSiblingsDetails($data['academicInfo']),
             'street_type' => $data['addressInfo']['streetType'],
             'street_name' => $data['addressInfo']['streetName'],
             'house_number' => $data['addressInfo']['houseNumber'],
@@ -153,6 +158,32 @@ class PreEnrollmentService
                 ? $data['tuitionVoucher']['schoolVoucherFolio']
                 : '0',
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $academic
+     */
+    private function buildSiblingsDetails(array $academic): ?string
+    {
+        if (empty($academic['hasSiblings'])) {
+            return null;
+        }
+
+        $parts = array_filter([
+            trim((string) ($academic['siblingHintLastName'] ?? '')),
+            trim((string) ($academic['siblingHintSecondLastName'] ?? '')),
+            trim((string) ($academic['siblingHintFirstName'] ?? '')),
+            trim((string) ($academic['siblingHintGrade'] ?? '')),
+            trim((string) ($academic['siblingHintGroup'] ?? '')),
+        ], fn ($part) => $part !== '');
+
+        if ($parts !== []) {
+            return implode(' ', $parts);
+        }
+
+        $legacy = trim((string) ($academic['siblingsDetails'] ?? ''));
+
+        return $legacy === '' ? null : $legacy;
     }
 
     private function imageToBase64(string $path, string $mime = 'png'): string

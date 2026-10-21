@@ -3,7 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
+use App\Exceptions\GuardianCurpConflictException;
+use App\Http\Requests\AttachStudentGuardianRequest;
+use App\Http\Requests\MergeStudentGuardianRequest;
 use App\Http\Requests\StoreStudentGuardianRequest;
+use App\Http\Requests\StoreStudentSiblingRequest;
 use App\Http\Requests\UpdateStudentGuardianRequest;
 use App\Http\Requests\UpdateStudentRequest;
 use App\Http\Resources\StudentDetailResource;
@@ -13,6 +17,7 @@ use App\Models\ClassGroup;
 use App\Models\Guardian;
 use App\Models\Student;
 use App\Services\CredentialPrintingService;
+use App\Services\StudentFamilyService;
 use App\Services\StudentPhotoPathService;
 use App\Services\StudentPhotoService;
 use App\Services\StudentsService;
@@ -27,6 +32,7 @@ class StudentController extends Controller
 {
     public function __construct(
         protected StudentsService $studentsService,
+        protected StudentFamilyService $studentFamilyService,
         protected StudentPhotoService $studentPhotoService,
         protected CredentialPrintingService $credentialPrintingService,
     ) {}
@@ -111,6 +117,125 @@ class StudentController extends Controller
     {
         try {
             $updated = $this->studentsService->updateGuardian($student, $guardian, $request->validated());
+        } catch (GuardianCurpConflictException $e) {
+            return response()->json([
+                'success' => false,
+                'code' => 'guardian_curp_exists',
+                'message' => $e->getMessage(),
+                'canonical' => $e->canonical,
+            ], 409);
+        } catch (RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => (new StudentDetailResource($updated))->resolve(),
+        ]);
+    }
+
+    /**
+     * Search enrolled students by name/CURP (and optional grade/group filters).
+     */
+    public function search(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'q' => ['nullable', 'string', 'max:120'],
+            'grade' => ['nullable', 'string', 'max:20'],
+            'group' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->studentFamilyService->searchStudents(
+                (string) ($validated['q'] ?? ''),
+                $validated['grade'] ?? null,
+                $validated['group'] ?? null,
+            ),
+        ]);
+    }
+
+    public function siblings(Student $student): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->studentFamilyService->listSiblings($student),
+        ]);
+    }
+
+    public function storeSibling(StoreStudentSiblingRequest $request, Student $student): JsonResponse
+    {
+        try {
+            $updated = $this->studentFamilyService->linkSibling(
+                $student,
+                (int) $request->validated('sibling_student_id')
+            );
+        } catch (RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => (new StudentDetailResource($updated))->resolve(),
+        ], 201);
+    }
+
+    public function destroySibling(Student $student, Student $sibling): JsonResponse
+    {
+        $updated = $this->studentFamilyService->unlinkSibling($student, $sibling->id);
+
+        return response()->json([
+            'success' => true,
+            'data' => (new StudentDetailResource($updated))->resolve(),
+        ]);
+    }
+
+    public function siblingGuardians(Student $student): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->studentFamilyService->siblingGuardians($student),
+        ]);
+    }
+
+    public function attachGuardian(AttachStudentGuardianRequest $request, Student $student): JsonResponse
+    {
+        try {
+            $data = $request->validated();
+            $updated = $this->studentFamilyService->attachGuardian(
+                $student,
+                (int) $data['guardian_id'],
+                $data['relationship'] ?? null,
+            );
+        } catch (RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => (new StudentDetailResource($updated))->resolve(),
+        ]);
+    }
+
+    public function mergeGuardian(MergeStudentGuardianRequest $request, Student $student): JsonResponse
+    {
+        try {
+            $data = $request->validated();
+            $updated = $this->studentFamilyService->mergeGuardianByCurp(
+                $student,
+                (int) $data['draft_guardian_id'],
+                (int) $data['canonical_guardian_id'],
+                $data['relationship'] ?? null,
+            );
         } catch (RuntimeException $e) {
             return response()->json([
                 'success' => false,

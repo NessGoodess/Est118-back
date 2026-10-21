@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Enums\PersonPhotoKind;
 use App\Models\Guardian;
+use App\Models\Student;
 use App\Services\People\PersonPhotoPathService;
 use App\Services\StudentPhotoPathService;
 use Carbon\Carbon;
@@ -135,6 +136,21 @@ class StudentDetailResource extends JsonResource
             'guardians' => $student->guardians->map(
                 fn ($guardian) => $this->guardianPayload($guardian)
             ),
+            'siblings' => $student->relationLoaded('siblings')
+                ? $student->siblings->map(function (Student $sibling) {
+                    $enrollment = $sibling->relationLoaded('currentEnrollment')
+                        ? $sibling->currentEnrollment
+                        : null;
+
+                    return [
+                        'id' => $sibling->id,
+                        'name' => $sibling->profile?->fullName() ?? '',
+                        'curp' => strtoupper(trim((string) ($sibling->profile?->national_id ?? ''))),
+                        'grade' => (string) ($enrollment?->classGroup?->gradeLevel?->name ?? ''),
+                        'group' => (string) ($enrollment?->classGroup?->name ?? ''),
+                    ];
+                })->values()
+                : [],
         ];
     }
 

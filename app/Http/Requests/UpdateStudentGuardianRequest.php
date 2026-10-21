@@ -4,7 +4,6 @@ namespace App\Http\Requests;
 
 use App\Support\Curp;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class UpdateStudentGuardianRequest extends FormRequest
 {
@@ -31,9 +30,7 @@ class UpdateStudentGuardianRequest extends FormRequest
      */
     public function rules(): array
     {
-        $guardian = $this->route('guardian');
-        $profileId = is_object($guardian) ? $guardian->profile_id : null;
-
+        // CURP uniqueness is resolved in StudentFamilyService (409 merge conflict vs hard error).
         return [
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
@@ -42,7 +39,6 @@ class UpdateStudentGuardianRequest extends FormRequest
                 'string',
                 'size:18',
                 'regex:'.Curp::PATTERN,
-                Rule::unique('profiles', 'national_id')->ignore($profileId),
             ],
             'relationship' => ['nullable', 'string', 'max:50'],
             'email' => ['nullable', 'email', 'max:255'],
@@ -58,7 +54,6 @@ class UpdateStudentGuardianRequest extends FormRequest
         return [
             'national_id.regex' => 'La CURP del tutor no es válida.',
             'national_id.size' => 'La CURP del tutor debe tener 18 caracteres.',
-            'national_id.unique' => 'Esa CURP ya está registrada.',
         ];
     }
 }

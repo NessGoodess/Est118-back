@@ -268,6 +268,11 @@ class ConvertPreEnrollmentToStudentService
                     $guardian->id => ['relationship' => $locked->guardian_relationship],
                 ]);
 
+                $siblingIds = is_array($locked->sibling_student_ids) ? $locked->sibling_student_ids : [];
+                if ($siblingIds !== []) {
+                    app(StudentFamilyService::class)->linkSiblings($student, $siblingIds);
+                }
+
                 if (Enrollment::query()
                     ->where('student_id', $student->id)
                     ->where('academic_year_id', $academicYear->id)

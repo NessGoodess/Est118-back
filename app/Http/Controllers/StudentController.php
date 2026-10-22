@@ -17,9 +17,10 @@ use App\Models\ClassGroup;
 use App\Models\Guardian;
 use App\Models\Student;
 use App\Services\CredentialPrintingService;
-use App\Services\StudentFamilyService;
+use App\Services\GuardianCurpMergeService;
 use App\Services\StudentPhotoPathService;
 use App\Services\StudentPhotoService;
+use App\Services\StudentSiblingService;
 use App\Services\StudentsService;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
@@ -32,7 +33,8 @@ class StudentController extends Controller
 {
     public function __construct(
         protected StudentsService $studentsService,
-        protected StudentFamilyService $studentFamilyService,
+        protected StudentSiblingService $studentSiblingService,
+        protected GuardianCurpMergeService $guardianCurpMergeService,
         protected StudentPhotoService $studentPhotoService,
         protected CredentialPrintingService $credentialPrintingService,
     ) {}
@@ -97,6 +99,15 @@ class StudentController extends Controller
     {
         try {
             $updated = $this->studentsService->storeGuardian($student, $request->validated());
+        } catch (GuardianCurpConflictException $e) {
+            return response()->json([
+                'success' => false,
+                'code' => 'guardian_curp_exists',
+                'message' => $e->getMessage(),
+                'canonical' => $e->canonical,
+                'draft' => $e->draft,
+                'pending' => $e->pending,
+            ], 409);
         } catch (RuntimeException $e) {
             return response()->json([
                 'success' => false,
@@ -123,6 +134,8 @@ class StudentController extends Controller
                 'code' => 'guardian_curp_exists',
                 'message' => $e->getMessage(),
                 'canonical' => $e->canonical,
+                'draft' => $e->draft,
+                'pending' => $e->pending,
             ], 409);
         } catch (RuntimeException $e) {
             return response()->json([
@@ -150,7 +163,7 @@ class StudentController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $this->studentFamilyService->searchStudents(
+            'data' => $this->studentSiblingService->searchStudents(
                 (string) ($validated['q'] ?? ''),
                 $validated['grade'] ?? null,
                 $validated['group'] ?? null,
@@ -162,14 +175,14 @@ class StudentController extends Controller
     {
         return response()->json([
             'success' => true,
-            'data' => $this->studentFamilyService->listSiblings($student),
+            'data' => $this->studentSiblingService->listSiblings($student),
         ]);
     }
 
     public function storeSibling(StoreStudentSiblingRequest $request, Student $student): JsonResponse
     {
         try {
-            $updated = $this->studentFamilyService->linkSibling(
+            $updated = $this->studentSiblingService->linkSibling(
                 $student,
                 (int) $request->validated('sibling_student_id')
             );
@@ -188,7 +201,7 @@ class StudentController extends Controller
 
     public function destroySibling(Student $student, Student $sibling): JsonResponse
     {
-        $updated = $this->studentFamilyService->unlinkSibling($student, $sibling->id);
+        $updated = $this->studentSiblingService->unlinkSibling($student, $sibling->id);
 
         return response()->json([
             'success' => true,
@@ -200,7 +213,7 @@ class StudentController extends Controller
     {
         return response()->json([
             'success' => true,
-            'data' => $this->studentFamilyService->siblingGuardians($student),
+            'data' => $this->studentSiblingService->siblingGuardians($student),
         ]);
     }
 
@@ -208,7 +221,7 @@ class StudentController extends Controller
     {
         try {
             $data = $request->validated();
-            $updated = $this->studentFamilyService->attachGuardian(
+            $updated = $this->studentSiblingService->attachGuardian(
                 $student,
                 (int) $data['guardian_id'],
                 $data['relationship'] ?? null,
@@ -229,13 +242,7 @@ class StudentController extends Controller
     public function mergeGuardian(MergeStudentGuardianRequest $request, Student $student): JsonResponse
     {
         try {
-            $data = $request->validated();
-            $updated = $this->studentFamilyService->mergeGuardianByCurp(
-                $student,
-                (int) $data['draft_guardian_id'],
-                (int) $data['canonical_guardian_id'],
-                $data['relationship'] ?? null,
-            );
+            $updated = $this->guardianCurpMergeService->mergeGuardianByCurp($student, $request->validated());
         } catch (RuntimeException $e) {
             return response()->json([
                 'success' => false,

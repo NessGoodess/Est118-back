@@ -50,7 +50,7 @@ class PreEnrollmentDetailResource extends JsonResource
             'sibling_student_ids' => $this->sibling_student_ids ?? [],
             'guardian_match' => $this->when(
                 $request->user() !== null,
-                fn () => app(\App\Services\StudentFamilyService::class)
+                fn () => app(\App\Services\GuardianCurpMergeService::class)
                     ->lookupPersonByCurp($this->guardian_curp)
             ),
             'street_type' => $this->street_type,

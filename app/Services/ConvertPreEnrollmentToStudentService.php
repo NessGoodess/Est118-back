@@ -270,7 +270,7 @@ class ConvertPreEnrollmentToStudentService
 
                 $siblingIds = is_array($locked->sibling_student_ids) ? $locked->sibling_student_ids : [];
                 if ($siblingIds !== []) {
-                    app(StudentFamilyService::class)->linkSiblings($student, $siblingIds);
+                    app(StudentSiblingService::class)->linkSiblings($student, $siblingIds);
                 }
 
                 if (Enrollment::query()

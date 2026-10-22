@@ -30,7 +30,7 @@ class UpdateStudentGuardianRequest extends FormRequest
      */
     public function rules(): array
     {
-        // CURP uniqueness is resolved in StudentFamilyService (409 merge conflict vs hard error).
+        // CURP uniqueness is resolved in GuardianCurpMergeService (409 merge conflict vs hard error).
         return [
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],

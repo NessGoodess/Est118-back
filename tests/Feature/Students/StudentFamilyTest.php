@@ -128,12 +128,70 @@ class StudentFamilyTest extends TestCase
         $this->postJson("/api/students/{$student->id}/guardians/merge-by-curp", [
             'draft_guardian_id' => $draft->id,
             'canonical_guardian_id' => $canonical->id,
+            'survivor' => 'canonical',
             'relationship' => 'Madre',
         ])->assertOk();
 
         $this->assertTrue($student->fresh()->guardians()->whereKey($canonical->id)->exists());
         $this->assertFalse($student->fresh()->guardians()->whereKey($draft->id)->exists());
         $this->assertDatabaseMissing('guardians', ['id' => $draft->id]);
+    }
+
+    public function test_store_guardian_curp_conflict_returns_409(): void
+    {
+        $this->actingEditor();
+        $student = $this->student('ANA', 'TORRES');
+        $this->guardian('ROSA', 'LOPEZ', 'LOPR850101MDFPRS09');
+
+        $this->postJson("/api/students/{$student->id}/guardians", [
+            'first_name' => 'Rosa',
+            'last_name' => 'Lopez',
+            'curp' => 'LOPR850101MDFPRS09',
+            'relationship' => 'Madre',
+            'address_mode' => 'new',
+            'address' => [
+                'street_type' => 'Calle',
+                'street_name' => 'Reforma',
+                'house_number' => '1',
+                'neighborhood_type' => 'Colonia',
+                'neighborhood_name' => 'Centro',
+                'postal_code' => '68000',
+                'city' => 'Oaxaca',
+                'state' => 'Oaxaca',
+            ],
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'guardian_curp_exists');
+    }
+
+    public function test_merge_prefers_draft_as_survivor_and_shares_students(): void
+    {
+        $this->actingEditor();
+        $a = $this->student('ANA', 'TORRES');
+        $b = $this->student('LUIS', 'TORRES');
+        $draft = $this->guardian('ROSA', 'SINCURP', null);
+        $canonical = $this->guardian('ROSA', 'LOPEZ', 'LOPR850101MDFPRS09');
+        $a->guardians()->syncWithoutDetaching([$draft->id => ['relationship' => 'Madre']]);
+        $b->guardians()->syncWithoutDetaching([$canonical->id => ['relationship' => 'Madre']]);
+
+        $this->postJson("/api/students/{$a->id}/guardians/merge-by-curp", [
+            'draft_guardian_id' => $draft->id,
+            'canonical_guardian_id' => $canonical->id,
+            'survivor' => 'draft',
+            'field_sources' => [
+                'name' => 'canonical',
+                'phone' => 'draft',
+                'email' => 'draft',
+                'address' => 'none',
+            ],
+            'relationship' => 'Madre',
+        ])->assertOk();
+
+        $this->assertTrue($a->fresh()->guardians()->whereKey($draft->id)->exists());
+        $this->assertTrue($b->fresh()->guardians()->whereKey($draft->id)->exists());
+        $this->assertSame('LOPR850101MDFPRS09', $draft->fresh()->profile->national_id);
+        $this->assertSame('LOPEZ', $draft->fresh()->profile->last_name);
+        $this->assertDatabaseMissing('guardians', ['id' => $canonical->id]);
     }
 
     public function test_search_students_by_name(): void
@@ -146,6 +204,19 @@ class StudentFamilyTest extends TestCase
         $names = collect($response->json('data'))->pluck('name')->implode(' ');
         $this->assertStringContainsString('TORRES', $names);
         $this->assertStringNotContainsString('PEREZ', $names);
+    }
+
+    public function test_search_students_is_case_insensitive_and_token_order_free(): void
+    {
+        $this->actingEditor();
+        $this->student('JUAN', 'PEREZ');
+        $this->student('LUIS', 'GARCIA');
+
+        $response = $this->getJson('/api/students/search?q='.urlencode('perez juan'))->assertOk();
+        $names = collect($response->json('data'))->pluck('name')->implode(' ');
+        $this->assertStringContainsString('JUAN', $names);
+        $this->assertStringContainsString('PEREZ', $names);
+        $this->assertStringNotContainsString('GARCIA', $names);
     }
 
     private function student(string $first, string $last): Student

@@ -25,6 +25,8 @@ class PreEnrollmentListResource extends JsonResource
             'curp' => $this->curp,
             'gender' => $this->gender,
             'age' => $this->age,
+            'has_siblings' => (bool) $this->has_siblings,
+            'siblings_linked' => is_array($this->sibling_student_ids) && count($this->sibling_student_ids) > 0,
             'guardian_name' => trim("{$this->guardian_first_name} {$this->guardian_last_name} {$this->guardian_second_last_name}"),
             'guardian_phone' => $this->guardian_phone,
             'contact_email' => $this->contact_email,

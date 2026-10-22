@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\GuardianCurpConflictException;
 use App\Models\AcademicYear;
 use App\Models\Guardian;
 use App\Models\Profile;
@@ -114,6 +115,15 @@ class StudentsService
                 'email' => ($data['email'] ?? null) ?: null,
             ];
 
+            if ($curp !== '') {
+                app(GuardianCurpMergeService::class)->assertCurpFreeOrConflict($curp, [
+                    ...$attributes,
+                    'phone' => $attributes['phone_number'],
+                    'email' => $attributes['email'],
+                    'relationship' => $data['relationship'] ?? null,
+                ]);
+            }
+
             // Without a CURP there is no safe key to match an existing person.
             $guardianProfile = $curp !== ''
                 ? Profile::query()->firstOrCreate(['national_id' => $curp], $attributes)
@@ -152,7 +162,7 @@ class StudentsService
      */
     public function updateGuardian(Student $student, Guardian $guardian, array $data): Student
     {
-        return app(StudentFamilyService::class)->updateGuardianOrConflict($student, $guardian, $data);
+        return app(GuardianCurpMergeService::class)->updateGuardianOrConflict($student, $guardian, $data);
     }
 
     public function listIndex(): Collection

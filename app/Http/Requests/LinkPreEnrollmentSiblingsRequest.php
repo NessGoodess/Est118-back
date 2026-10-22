@@ -17,7 +17,7 @@ class LinkPreEnrollmentSiblingsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'sibling_student_ids' => ['required', 'array'],
+            'sibling_student_ids' => ['present', 'array'],
             'sibling_student_ids.*' => ['integer', 'exists:students,id'],
         ];
     }

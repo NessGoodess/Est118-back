@@ -24,6 +24,8 @@ class StoreStaffRequest extends FormRequest
         return [
             ...$this->personRules(),
             ...$this->addressRules(),
+            ...$this->insuranceRules(),
+            ...$this->emergencyContactRules(),
             'position' => ['required', 'string', 'min:2', 'max:100'],
             'department' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', Rule::enum(StaffStatus::class)],

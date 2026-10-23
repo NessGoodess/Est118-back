@@ -71,9 +71,22 @@ class GuardianCurpMergeService
         $profile->save();
 
         $relationship = trim((string) ($data['relationship'] ?? ''));
-        $student->guardians()->updateExistingPivot($guardian->id, [
+        $pivot = [
             'relationship' => $relationship === '' ? null : $relationship,
-        ]);
+        ];
+        if (array_key_exists('sort_order', $data)) {
+            $pivot['sort_order'] = (int) $data['sort_order'];
+        }
+        if (array_key_exists('is_primary', $data)) {
+            $pivot['is_primary'] = (bool) $data['is_primary'];
+            if ($pivot['is_primary']) {
+                DB::table('guardian_student')
+                    ->where('student_id', $student->id)
+                    ->where('guardian_id', '!=', $guardian->id)
+                    ->update(['is_primary' => false]);
+            }
+        }
+        $student->guardians()->updateExistingPivot($guardian->id, $pivot);
 
         return app(StudentsService::class)->findForDetail($student->id);
     }
@@ -171,8 +184,12 @@ class GuardianCurpMergeService
                 $rel = $relationship !== ''
                     ? $relationship
                     : (string) ($pending['relationship'] ?? '');
+                $rel = $rel === '' ? null : $rel;
+                $alreadyLinked = $student->guardians()->where('guardians.id', $canonical->id)->exists();
                 $student->guardians()->syncWithoutDetaching([
-                    $canonical->id => ['relationship' => $rel === '' ? null : $rel],
+                    $canonical->id => $alreadyLinked
+                        ? ['relationship' => $rel]
+                        : $student->guardianAttachPivot($rel),
                 ]);
 
                 return app(StudentsService::class)->findForDetail($student->id);
@@ -229,18 +246,34 @@ class GuardianCurpMergeService
                     ?? '');
             }
 
-            // Reassign every student from discard onto survivor.
+            // Reassign every student from discard onto survivor, keeping primary/sort when possible.
             foreach ($discard->students as $linkedStudent) {
                 $pivotRel = $linkedStudent->pivot->relationship ?? $rel;
-                $linkedStudent->guardians()->syncWithoutDetaching([
-                    $survivor->id => ['relationship' => $pivotRel === '' ? null : $pivotRel],
-                ]);
+                $pivotRel = $pivotRel === '' ? null : $pivotRel;
+                $existingSurvivor = $linkedStudent->guardians()->where('guardians.id', $survivor->id)->first();
+                if ($existingSurvivor) {
+                    $linkedStudent->guardians()->syncWithoutDetaching([
+                        $survivor->id => ['relationship' => $pivotRel],
+                    ]);
+                } else {
+                    $linkedStudent->guardians()->syncWithoutDetaching([
+                        $survivor->id => [
+                            'relationship' => $pivotRel,
+                            'is_primary' => (bool) ($linkedStudent->pivot->is_primary ?? false),
+                            'sort_order' => (int) ($linkedStudent->pivot->sort_order ?? 0),
+                        ],
+                    ]);
+                }
                 $linkedStudent->guardians()->detach($discard->id);
             }
 
             // Ensure current student is on survivor.
+            $relNormalized = $rel === '' ? null : $rel;
+            $existingOnStudent = $student->guardians()->where('guardians.id', $survivor->id)->exists();
             $student->guardians()->syncWithoutDetaching([
-                $survivor->id => ['relationship' => $rel === '' ? null : $rel],
+                $survivor->id => $existingOnStudent
+                    ? ['relationship' => $relNormalized]
+                    : $student->guardianAttachPivot($relNormalized),
             ]);
             $student->guardians()->detach($discard->id);
 

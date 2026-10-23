@@ -315,6 +315,8 @@ class CardTemplateService
             ['key' => 'school', 'label' => 'Escuela'],
             ['key' => 'role', 'label' => 'Puesto o cargo', 'audiences' => [...$people, ...$guardians]],
             ['key' => 'department', 'label' => 'Departamento', 'audiences' => $people],
+            ['key' => 'emergency_contact', 'label' => 'Contacto de emergencia', 'audiences' => $people],
+            ['key' => 'insurance_number', 'label' => 'Número de seguro', 'audiences' => $people],
             ['key' => 'kinship', 'label' => 'Parentesco', 'audiences' => $guardians],
             ['key' => 'dependent', 'label' => 'Menor a cargo', 'audiences' => $guardians],
             ['key' => 'dependents', 'label' => 'Menores a cargo (lista)', 'audiences' => $guardians],

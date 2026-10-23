@@ -264,8 +264,12 @@ class ConvertPreEnrollmentToStudentService
                     ['Kinship' => $locked->guardian_relationship ?: 'TUTOR']
                 );
 
+                $alreadyLinked = $student->guardians()->where('guardians.id', $guardian->id)->exists();
+                $rel = $locked->guardian_relationship ?: null;
                 $student->guardians()->syncWithoutDetaching([
-                    $guardian->id => ['relationship' => $locked->guardian_relationship],
+                    $guardian->id => $alreadyLinked
+                        ? ['relationship' => $rel]
+                        : $student->guardianAttachPivot($rel),
                 ]);
 
                 $siblingIds = is_array($locked->sibling_student_ids) ? $locked->sibling_student_ids : [];

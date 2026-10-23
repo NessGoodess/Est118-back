@@ -4,6 +4,7 @@ namespace App\Services\Staff;
 
 use App\Enums\StaffStatus;
 use App\Models\Staff;
+use App\Services\People\EmergencyContactSyncService;
 use App\Services\People\PersonAddressService;
 use App\Services\People\PersonProfileService;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ class StaffWriteService
     public function __construct(
         private readonly PersonProfileService $profiles,
         private readonly PersonAddressService $addresses,
+        private readonly EmergencyContactSyncService $emergencyContacts,
     ) {}
 
     /**
@@ -23,6 +25,9 @@ class StaffWriteService
         return DB::transaction(function () use ($data) {
             $profile = $this->profiles->create($data);
             $this->addresses->upsertFor($profile, $data);
+            if (array_key_exists('emergency_contacts', $data) && is_array($data['emergency_contacts'])) {
+                $this->emergencyContacts->sync($profile, $data['emergency_contacts']);
+            }
 
             $staff = Staff::query()->create([
                 'profile_id' => $profile->id,
@@ -31,7 +36,7 @@ class StaffWriteService
                 'status' => $data['status'] ?? StaffStatus::ACTIVE,
             ]);
 
-            return $staff->load('profile.address');
+            return $staff->load(['profile.address', 'profile.emergencyContacts']);
         });
     }
 
@@ -49,6 +54,9 @@ class StaffWriteService
             if (isset($data['address']) && is_array($data['address'])) {
                 $this->addresses->upsertFor($staff->profile, $data['address']);
             }
+            if (array_key_exists('emergency_contacts', $data) && is_array($data['emergency_contacts'])) {
+                $this->emergencyContacts->sync($staff->profile, $data['emergency_contacts']);
+            }
             if (isset($data['job']) && is_array($data['job'])) {
                 $job = $data['job'];
                 $staff->fill([
@@ -58,7 +66,7 @@ class StaffWriteService
                 ])->save();
             }
 
-            return $staff->fresh(['profile.address']);
+            return $staff->fresh(['profile.address', 'profile.emergencyContacts']);
         });
     }
 }

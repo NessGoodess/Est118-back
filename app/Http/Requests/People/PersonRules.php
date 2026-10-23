@@ -48,6 +48,39 @@ trait PersonRules
     }
 
     /**
+     * Insurance on profile + optional emergency contacts list.
+     *
+     * @return array<string, mixed>
+     */
+    protected function insuranceRules(string $prefix = '', bool $required = false): array
+    {
+        $key = $prefix === '' ? '' : rtrim($prefix, '.').'.';
+        $presence = $required ? 'required' : 'sometimes';
+
+        return [
+            $key.'insurance_type' => [$presence, 'nullable', 'string', 'in:imss,issste,other,none'],
+            $key.'insurance_number' => [$presence, 'nullable', 'string', 'max:40'],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function emergencyContactRules(string $prefix = 'emergency_contacts', bool $required = false): array
+    {
+        $presence = $required ? 'required' : 'sometimes';
+
+        return [
+            $prefix => [$presence, 'array'],
+            $prefix.'.*.name' => ['required', 'string', 'min:2', 'max:120'],
+            $prefix.'.*.phone' => ['required', 'digits:10'],
+            $prefix.'.*.relationship' => ['nullable', 'string', 'max:50'],
+            $prefix.'.*.is_primary' => ['sometimes', 'boolean'],
+            $prefix.'.*.sort_order' => ['sometimes', 'integer', 'min:0', 'max:255'],
+        ];
+    }
+
+    /**
      * @param  array<int, string>  $fields
      */
     protected function uppercaseFields(array $fields): void

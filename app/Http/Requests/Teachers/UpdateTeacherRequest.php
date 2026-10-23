@@ -24,8 +24,10 @@ class UpdateTeacherRequest extends FormRequest
         return [
             'personal' => ['sometimes', 'array'],
             ...$this->personRules('personal', false),
+            ...$this->insuranceRules('personal', false),
             'address' => ['sometimes', 'array'],
             ...$this->addressRules('address', false),
+            ...$this->emergencyContactRules(),
             'job' => ['sometimes', 'array'],
             'job.employee' => ['sometimes', 'nullable', 'string', 'max:100'],
             'job.classroom' => ['sometimes', 'nullable', 'string', 'max:100'],

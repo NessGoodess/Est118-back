@@ -41,6 +41,8 @@ class UpdateStudentGuardianRequest extends FormRequest
                 'regex:'.Curp::PATTERN,
             ],
             'relationship' => ['nullable', 'string', 'max:50'],
+            'is_primary' => ['sometimes', 'boolean'],
+            'sort_order' => ['sometimes', 'integer', 'min:0', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:30'],
         ];

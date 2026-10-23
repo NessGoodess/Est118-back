@@ -24,8 +24,10 @@ class UpdateStaffRequest extends FormRequest
         return [
             'personal' => ['sometimes', 'array'],
             ...$this->personRules('personal', false),
+            ...$this->insuranceRules('personal', false),
             'address' => ['sometimes', 'array'],
             ...$this->addressRules('address', false),
+            ...$this->emergencyContactRules(),
             'job' => ['sometimes', 'array'],
             'job.position' => ['sometimes', 'string', 'min:2', 'max:100'],
             'job.department' => ['sometimes', 'nullable', 'string', 'max:100'],

@@ -136,8 +136,21 @@ class StudentsService
                 ['Kinship' => $relationship]
             );
 
+            $alreadyLinked = $student->guardians()->where('guardians.id', $guardian->id)->exists();
+            $pivot = $alreadyLinked
+                ? ['relationship' => $relationship]
+                : $student->guardianAttachPivot($relationship);
+
+            if (array_key_exists('is_primary', $data) && (bool) $data['is_primary']) {
+                DB::table('guardian_student')
+                    ->where('student_id', $student->id)
+                    ->where('guardian_id', '!=', $guardian->id)
+                    ->update(['is_primary' => false]);
+                $pivot['is_primary'] = true;
+            }
+
             $student->guardians()->syncWithoutDetaching([
-                $guardian->id => ['relationship' => $relationship],
+                $guardian->id => $pivot,
             ]);
 
             if (($data['address_mode'] ?? '') === 'student') {

@@ -55,8 +55,29 @@ class Student extends Model
     public function guardians(): BelongsToMany
     {
         return $this->belongsToMany(Guardian::class, 'guardian_student')
-            ->withPivot('relationship')
-            ->withTimestamps();
+            ->withPivot(['relationship', 'is_primary', 'sort_order'])
+            ->withTimestamps()
+            ->orderByPivot('is_primary', 'desc')
+            ->orderByPivot('sort_order')
+            ->orderBy('guardians.id');
+    }
+
+    /**
+     * Pivot attrs for linking a guardian the student does not already have.
+     *
+     * @return array{relationship: ?string, is_primary: bool, sort_order: int}
+     */
+    public function guardianAttachPivot(?string $relationship = null): array
+    {
+        $hasAny = $this->guardians()->exists();
+
+        return [
+            'relationship' => $relationship === '' ? null : $relationship,
+            'is_primary' => ! $hasAny,
+            'sort_order' => $hasAny
+                ? (int) $this->guardians()->max('guardian_student.sort_order') + 1
+                : 0,
+        ];
     }
 
     /**

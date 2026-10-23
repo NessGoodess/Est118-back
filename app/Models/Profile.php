@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Profile extends Model
@@ -22,6 +23,8 @@ protected $fillable = [
         'email',
         'phone_number',
         'phone_second_number',
+        'insurance_type',
+        'insurance_number',
         'profile_picture',
         'gender',
         'address_id',
@@ -91,5 +94,10 @@ protected $fillable = [
     public function address(): BelongsTo
     {
         return $this->belongsTo(Address::class);
+    }
+
+    public function emergencyContacts(): HasMany
+    {
+        return $this->hasMany(EmergencyContact::class)->orderBy('sort_order')->orderBy('id');
     }
 }

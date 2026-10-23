@@ -28,6 +28,6 @@ class StaffQueryService
 
     public function detail(Staff $staff): Staff
     {
-        return $staff->load('profile.address');
+        return $staff->load(['profile.address', 'profile.emergencyContacts']);
     }
 }

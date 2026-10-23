@@ -17,6 +17,10 @@ class ProfileResource extends JsonResource
         $profile = $this->resource;
         $address = $profile->relationLoaded('address') ? $profile->address : null;
 
+        $contacts = $profile->relationLoaded('emergencyContacts')
+            ? $profile->emergencyContacts
+            : collect();
+
         return [
             'id' => $profile->id,
             'first_name' => $profile->first_name,
@@ -27,6 +31,16 @@ class ProfileResource extends JsonResource
             'gender' => $profile->gender,
             'phone' => $profile->phone_number,
             'email' => $profile->email,
+            'insurance_type' => $profile->insurance_type,
+            'insurance_number' => $profile->insurance_number,
+            'emergency_contacts' => $contacts->map(fn ($contact) => [
+                'id' => $contact->id,
+                'name' => $contact->name,
+                'phone' => $contact->phone,
+                'relationship' => $contact->relationship,
+                'is_primary' => (bool) $contact->is_primary,
+                'sort_order' => (int) $contact->sort_order,
+            ])->values()->all(),
             'address' => $address ? [
                 'street_type' => $address->street_type,
                 'street_name' => $address->street_name,

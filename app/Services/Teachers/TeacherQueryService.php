@@ -31,6 +31,7 @@ class TeacherQueryService
     {
         return $teacher->load([
             'profile.address',
+            'profile.emergencyContacts',
             'schoolClasses.subject',
             'schoolClasses.classGroup.gradeLevel',
             'schoolClasses.classGroup.academicYear',

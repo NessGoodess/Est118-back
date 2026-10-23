@@ -20,12 +20,14 @@ class StaffDetailResource extends JsonResource
         $staff = $this->resource;
         $personal = (new ProfileResource($staff->profile))->toArray($request);
         $address = $personal['address'] ?? null;
-        unset($personal['address'], $personal['id']);
+        $emergencyContacts = $personal['emergency_contacts'] ?? [];
+        unset($personal['address'], $personal['id'], $personal['emergency_contacts']);
 
         return [
             'id' => $staff->id,
             'personal' => $personal,
             'address' => $address,
+            'emergency_contacts' => $emergencyContacts,
             'job' => [
                 'position' => $staff->position,
                 'department' => $staff->department,

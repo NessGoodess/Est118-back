@@ -4,6 +4,7 @@ namespace App\Services\Teachers;
 
 use App\Enums\TeacherStatus;
 use App\Models\Teacher;
+use App\Services\People\EmergencyContactSyncService;
 use App\Services\People\PersonAddressService;
 use App\Services\People\PersonProfileService;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ class TeacherWriteService
     public function __construct(
         private readonly PersonProfileService $profiles,
         private readonly PersonAddressService $addresses,
+        private readonly EmergencyContactSyncService $emergencyContacts,
     ) {}
 
     /**
@@ -23,6 +25,9 @@ class TeacherWriteService
         return DB::transaction(function () use ($data) {
             $profile = $this->profiles->create($data);
             $this->addresses->upsertFor($profile, $data);
+            if (array_key_exists('emergency_contacts', $data) && is_array($data['emergency_contacts'])) {
+                $this->emergencyContacts->sync($profile, $data['emergency_contacts']);
+            }
 
             $teacher = Teacher::query()->create([
                 'profile_id' => $profile->id,
@@ -33,7 +38,7 @@ class TeacherWriteService
                 'status' => $data['status'] ?? TeacherStatus::ACTIVE,
             ]);
 
-            return $teacher->load('profile.address');
+            return $teacher->load(['profile.address', 'profile.emergencyContacts']);
         });
     }
 
@@ -51,6 +56,9 @@ class TeacherWriteService
             if (isset($data['address']) && is_array($data['address'])) {
                 $this->addresses->upsertFor($teacher->profile, $data['address']);
             }
+            if (array_key_exists('emergency_contacts', $data) && is_array($data['emergency_contacts'])) {
+                $this->emergencyContacts->sync($teacher->profile, $data['emergency_contacts']);
+            }
             if (isset($data['job']) && is_array($data['job'])) {
                 $job = $data['job'];
                 $teacher->fill([
@@ -62,7 +70,12 @@ class TeacherWriteService
                 ])->save();
             }
 
-            return $teacher->fresh(['profile.address', 'schoolClasses.subject', 'schoolClasses.classGroup.gradeLevel']);
+            return $teacher->fresh([
+                'profile.address',
+                'profile.emergencyContacts',
+                'schoolClasses.subject',
+                'schoolClasses.classGroup.gradeLevel',
+            ]);
         });
     }
 }

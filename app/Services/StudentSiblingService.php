@@ -134,9 +134,13 @@ class StudentSiblingService
 
         $rel = trim((string) $relationship);
         $rel = $rel === '' ? ($guardian->students->firstWhere('id', '!=', $student->id)?->pivot?->relationship) : $rel;
+        $rel = $rel === '' ? null : $rel;
 
+        $alreadyLinked = $student->guardians()->where('guardians.id', $guardian->id)->exists();
         $student->guardians()->syncWithoutDetaching([
-            $guardian->id => ['relationship' => $rel === '' ? null : $rel],
+            $guardian->id => $alreadyLinked
+                ? ['relationship' => $rel]
+                : $student->guardianAttachPivot($rel),
         ]);
 
         return app(StudentsService::class)->findForDetail($student->id);

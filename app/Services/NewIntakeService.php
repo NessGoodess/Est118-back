@@ -162,7 +162,7 @@ class NewIntakeService
                 ['Kinship' => $data['guardian_relationship']]
             );
             $student->guardians()->syncWithoutDetaching([
-                $guardian->id => ['relationship' => $data['guardian_relationship']],
+                $guardian->id => $student->guardianAttachPivot($data['guardian_relationship']),
             ]);
 
             $enrollment = Enrollment::query()->create([

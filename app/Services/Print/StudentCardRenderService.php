@@ -11,6 +11,7 @@ use App\Models\Staff;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Services\CredentialPrintingService;
+use App\Services\People\EmergencyContactSyncService;
 use App\Services\People\GuardianCredentialData;
 use App\Services\People\PersonPhotoPathService;
 use App\Services\StudentPhotoPathService;
@@ -31,7 +32,8 @@ class StudentCardRenderService
         private readonly CredentialPrintingService $credentials,
         private readonly CardTemplateService $templates,
         private readonly PersonPhotoPathService $personPhotos,
-        private readonly GuardianCredentialData $guardians
+        private readonly GuardianCredentialData $guardians,
+        private readonly EmergencyContactSyncService $emergencyContacts,
     ) {}
 
     public function render(PrintJob $job): PrintJob
@@ -140,6 +142,9 @@ class StudentCardRenderService
         }
 
         $profile = $holder->profile;
+        if ($profile && ! $profile->relationLoaded('emergencyContacts')) {
+            $profile->load('emergencyContacts');
+        }
         $role = (string) ($holder->position ?: ($holder instanceof Teacher ? 'Docente' : $kind->label()));
         $department = (string) ($holder->department ?? '');
 
@@ -160,6 +165,8 @@ class StudentCardRenderService
             'school' => 'EST 118',
             'role' => $role,
             'department' => $department,
+            'emergency_contact' => $this->emergencyContacts->credentialLine($profile),
+            'insurance_number' => (string) ($profile?->insurance_number ?? ''),
         ];
     }
 

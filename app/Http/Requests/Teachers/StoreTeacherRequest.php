@@ -24,6 +24,8 @@ class StoreTeacherRequest extends FormRequest
         return [
             ...$this->personRules(),
             ...$this->addressRules(),
+            ...$this->insuranceRules(),
+            ...$this->emergencyContactRules(),
             'employee' => ['nullable', 'string', 'max:100'],
             'classroom' => ['nullable', 'string', 'max:100'],
             'position' => ['nullable', 'string', 'max:100'],

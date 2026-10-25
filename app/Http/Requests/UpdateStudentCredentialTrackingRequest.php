@@ -11,17 +11,17 @@ class UpdateStudentCredentialTrackingRequest extends FormRequest
         return $this->user() !== null;
     }
 
+    /**
+     * Delivery staff may only update payment / handoff flags.
+     * Impresa, NFC, listo and repuesto # are written by print/NFC/reprint services.
+     */
     public function rules(): array
     {
         return [
             'academic_year_id' => ['required', 'integer', 'exists:academic_years,id'],
-            'credential_printed' => ['sometimes', 'boolean'],
-            'nfc_ready' => ['sometimes', 'boolean'],
-            'ready_to_deliver' => ['sometimes', 'boolean'],
             'paid' => ['sometimes', 'boolean'],
             'delivered' => ['sometimes', 'boolean'],
             'lost' => ['sometimes', 'boolean'],
-            'replacement_count' => ['sometimes', 'integer', 'min:0', 'max:50'],
         ];
     }
 }

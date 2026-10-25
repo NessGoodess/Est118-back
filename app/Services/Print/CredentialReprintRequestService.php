@@ -140,7 +140,7 @@ class CredentialReprintRequestService
     }
 
     /**
-     * @param  array{bucket?: ?string, reason?: ?string, search?: ?string, student_id?: ?int, per_page?: ?int}  $filters
+     * @param  array{bucket?: ?string, reason?: ?string, search?: ?string, student_id?: ?int, class_group_id?: ?int, per_page?: ?int}  $filters
      */
     public function paginate(array $filters): LengthAwarePaginator
     {
@@ -171,7 +171,7 @@ class CredentialReprintRequestService
     /**
      * Counts per bucket with the same reason/search filters (chips ignore the bucket itself).
      *
-     * @param  array{reason?: ?string, search?: ?string, student_id?: ?int}  $filters
+     * @param  array{reason?: ?string, search?: ?string, student_id?: ?int, class_group_id?: ?int}  $filters
      * @return array<string, int>
      */
     public function counts(array $filters = []): array
@@ -254,6 +254,10 @@ class CredentialReprintRequestService
     {
         if (! empty($filters['student_id'])) {
             $query->where('student_id', (int) $filters['student_id']);
+        }
+
+        if (! empty($filters['class_group_id'])) {
+            $query->where('class_group_id', (int) $filters['class_group_id']);
         }
 
         if (! empty($filters['reason'])) {

@@ -352,13 +352,13 @@ class NfcAssignmentService
             return;
         }
 
-        StudentCredentialTracking::query()->updateOrCreate(
-            [
-                'student_id' => $job->student_id,
-                'academic_year_id' => $job->academic_year_id,
-            ],
-            ['nfc_ready' => $ready]
-        );
+        $tracking = StudentCredentialTracking::query()->firstOrNew([
+            'student_id' => $job->student_id,
+            'academic_year_id' => $job->academic_year_id,
+        ]);
+        $tracking->nfc_ready = $ready;
+        $tracking->syncReadyToDeliver();
+        $tracking->save();
     }
 
     private function assertAgent(NfcAssignments $job, string $agentId): void

@@ -655,15 +655,13 @@ class CredentialPrintService
             return;
         }
 
-        StudentCredentialTracking::query()->updateOrCreate(
-            [
-                'student_id' => $card->student_id,
-                'academic_year_id' => $card->academic_year_id,
-            ],
-            [
-                'credential_printed' => true,
-            ]
-        );
+        $tracking = StudentCredentialTracking::query()->firstOrNew([
+            'student_id' => $card->student_id,
+            'academic_year_id' => $card->academic_year_id,
+        ]);
+        $tracking->credential_printed = true;
+        $tracking->syncReadyToDeliver();
+        $tracking->save();
     }
 
     private function resolveReason(int $studentId, ?int $yearId): CredentialPrintReason

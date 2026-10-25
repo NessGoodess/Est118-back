@@ -26,6 +26,7 @@ class CredentialReprintRequestController extends Controller
             'reason' => ['nullable', 'string', 'max:32'],
             'search' => ['nullable', 'string', 'max:120'],
             'student_id' => ['nullable', 'integer'],
+            'class_group_id' => ['nullable', 'integer', 'exists:class_groups,id'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
             'page' => ['nullable', 'integer', 'min:1'],
         ]);

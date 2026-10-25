@@ -41,4 +41,10 @@ class StudentCredentialTracking extends Model
     {
         return $this->belongsTo(AcademicYear::class);
     }
+
+    /** Ready when both print and NFC verification are done. */
+    public function syncReadyToDeliver(): void
+    {
+        $this->ready_to_deliver = (bool) $this->credential_printed && (bool) $this->nfc_ready;
+    }
 }

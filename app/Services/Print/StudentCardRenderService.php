@@ -380,6 +380,7 @@ class StudentCardRenderService
         $key = (string) ($field['key'] ?? '');
         $label = (string) ($field['label'] ?? '');
         $isStatic = $key === 'static' || str_starts_with($key, 'static_');
+        $value = '';
         if ($isStatic) {
             $text = $label;
         } else {
@@ -387,15 +388,23 @@ class StudentCardRenderService
             if ($value === '') {
                 return;
             }
-            $text = $label !== '' ? $label.$value : $value;
+            $break = $label !== '' && (bool) ($field['label_break'] ?? false);
+            $text = $label !== '' ? ($break ? $label."\n".$value : $label.$value) : $value;
         }
         if ($text === '') {
             return;
         }
         if ((bool) ($field['uppercase'] ?? false)) {
             $text = mb_strtoupper($text, 'UTF-8');
+            $label = mb_strtoupper($label, 'UTF-8');
+            $value = mb_strtoupper($value, 'UTF-8');
+        } elseif ((bool) ($field['lowercase'] ?? false)) {
+            $text = mb_strtolower($text, 'UTF-8');
+            $label = mb_strtolower($label, 'UTF-8');
+            $value = mb_strtolower($value, 'UTF-8');
         }
         $bold = (bool) ($field['bold'] ?? false);
+        $labelBold = (bool) ($field['label_bold'] ?? false);
         [$regular, $boldFile] = CardFonts::pairFromFile(
             (string) ($field['font'] ?? $layout['font'] ?? CardFonts::DEFAULT_FILE)
         );
@@ -410,6 +419,7 @@ class StudentCardRenderService
         $w = max(48, (int) ($field['w'] ?? 0));
         $size = (float) ($field['size'] ?? 22);
         $fontPath = CardFonts::resolvePath($bold ? $boldFile : $regular);
+        $labelFontPath = CardFonts::resolvePath(($labelBold || $bold) ? $boldFile : $regular);
         $boxH = max(0, (int) ($field['h'] ?? 0));
         if (($field['fit'] ?? 'grow') === 'shrink' && $boxH > 0) {
             while ($size > 8 && $this->textBlockHeight($text, $size, $fontPath, $w) > $boxH) {
@@ -419,6 +429,7 @@ class StudentCardRenderService
         $contentH = $this->textBlockHeight($text, $size, $fontPath, $w);
         $h = max($contentH, max(0, (int) ($field['h'] ?? 0)), 32);
         $color = $this->hexToColor($img, (string) ($field['color'] ?? $defaultColor));
+        $useMixed = ! $isStatic && $label !== '' && ($labelBold || (bool) ($field['label_break'] ?? false));
 
         $this->withRotation(
             $img,
@@ -427,10 +438,187 @@ class StudentCardRenderService
             $w,
             $h,
             (float) ($field['rotate'] ?? 0),
-            function ($target, $dx, $dy) use ($text, $size, $color, $fontPath, $w, $h, $align, $valign) {
+            function ($target, $dx, $dy) use (
+                $text,
+                $label,
+                $value,
+                $size,
+                $color,
+                $fontPath,
+                $labelFontPath,
+                $w,
+                $h,
+                $align,
+                $valign,
+                $useMixed,
+                $field
+            ) {
+                if ($useMixed) {
+                    $this->drawLabeledText(
+                        $target,
+                        $label,
+                        $value,
+                        (bool) ($field['label_break'] ?? false),
+                        $dx,
+                        $dy,
+                        $size,
+                        $color,
+                        $labelFontPath,
+                        $fontPath,
+                        $w,
+                        $align,
+                        $valign,
+                        $h
+                    );
+
+                    return;
+                }
                 $this->drawText($target, $text, $dx, $dy, $size, $color, $fontPath, $w, $align, $valign, $h);
             }
         );
+    }
+
+    /**
+     * Draw prefix (optionally bold / on its own line) then the value.
+     *
+     * @param  \GdImage|resource  $img
+     */
+    private function drawLabeledText(
+        $img,
+        string $label,
+        string $value,
+        bool $breakAfterLabel,
+        int $x,
+        int $y,
+        float $size,
+        int $color,
+        string $labelFontPath,
+        string $valueFontPath,
+        int $maxWidth,
+        string $align,
+        string $valign,
+        int $boxHeight
+    ): void {
+        if ($breakAfterLabel) {
+            $full = $label."\n".$value;
+            // Height/valign from combined block, then draw label then value below.
+            $contentH = $this->textBlockHeight($full, $size, $valueFontPath, $maxWidth);
+            $offsetY = 0.0;
+            if ($boxHeight > 0 && $contentH < $boxHeight) {
+                if ($valign === 'middle') {
+                    $offsetY = ($boxHeight - $contentH) / 2;
+                } elseif ($valign === 'bottom') {
+                    $offsetY = $boxHeight - $contentH;
+                }
+            }
+            $labelH = $this->textBlockHeight($label, $size, $labelFontPath, $maxWidth);
+            $this->drawText(
+                $img,
+                $label,
+                $x,
+                (int) round($y + $offsetY),
+                $size,
+                $color,
+                $labelFontPath,
+                $maxWidth,
+                $align,
+                'top',
+                0
+            );
+            $this->drawText(
+                $img,
+                $value,
+                $x,
+                (int) round($y + $offsetY + $labelH),
+                $size,
+                $color,
+                $valueFontPath,
+                $maxWidth,
+                $align,
+                'top',
+                0
+            );
+
+            return;
+        }
+
+        // Same line: bold label then regular value; wrap remaining value under the box start.
+        if (! is_file($labelFontPath) || ! function_exists('imagettftext')) {
+            $this->drawText($img, $label.$value, $x, $y, $size, $color, $valueFontPath, $maxWidth, $align, $valign, $boxHeight);
+
+            return;
+        }
+
+        $lineHeight = $size * 1.1;
+        $labelInk = $this->textInkBox($label === '' ? ' ' : $label, $size, $labelFontPath);
+        $firstLineBudget = max(8.0, $maxWidth - $labelInk['width']);
+        $valueLines = $this->wrapText($value, $size, $valueFontPath, (int) ceil($firstLineBudget));
+        $firstValue = $valueLines[0] ?? '';
+        $rest = ltrim(mb_substr($value, mb_strlen($firstValue)));
+        $restLines = $rest === '' ? [] : $this->wrapText($rest, $size, $valueFontPath, $maxWidth);
+        $linesCount = 1 + count($restLines);
+        $contentH = $linesCount * $lineHeight;
+        $offsetY = 0.0;
+        if ($boxHeight > 0 && $contentH < $boxHeight) {
+            if ($valign === 'middle') {
+                $offsetY = ($boxHeight - $contentH) / 2;
+            } elseif ($valign === 'bottom') {
+                $offsetY = $boxHeight - $contentH;
+            }
+        }
+        $metrics = $this->fontLineMetrics($size, $labelFontPath);
+        $leading = $lineHeight - ($metrics['ascent'] + $metrics['descent']);
+        $baseY = $y + $offsetY + $metrics['ascent'] + ($leading / 2);
+
+        $firstWidth = $labelInk['width'] + $this->textInkBox($firstValue === '' ? ' ' : $firstValue, $size, $valueFontPath)['width'];
+        $lineX = (float) $x;
+        if ($align === 'center') {
+            $lineX = $x + ($maxWidth - $firstWidth) / 2;
+        } elseif ($align === 'right') {
+            $lineX = $x + $maxWidth - $firstWidth;
+        }
+        imagettftext(
+            $img,
+            $this->ttfSize($size),
+            0,
+            (int) round($lineX - $labelInk['left']),
+            (int) round($baseY),
+            $color,
+            $labelFontPath,
+            $label
+        );
+        if ($firstValue !== '') {
+            $valueInk = $this->textInkBox($firstValue, $size, $valueFontPath);
+            imagettftext(
+                $img,
+                $this->ttfSize($size),
+                0,
+                (int) round($lineX + $labelInk['width'] - $valueInk['left']),
+                (int) round($baseY),
+                $color,
+                $valueFontPath,
+                $firstValue
+            );
+        }
+        foreach ($restLines as $index => $line) {
+            $ink = $this->textInkBox($line === '' ? ' ' : $line, $size, $valueFontPath);
+            $lx = (float) $x;
+            if ($align === 'center') {
+                $lx = $x + ($maxWidth - $ink['width']) / 2;
+            } elseif ($align === 'right') {
+                $lx = $x + $maxWidth - $ink['width'];
+            }
+            imagettftext(
+                $img,
+                $this->ttfSize($size),
+                0,
+                (int) round($lx - $ink['left']),
+                (int) round($baseY + (($index + 1) * $lineHeight)),
+                $color,
+                $valueFontPath,
+                $line
+            );
+        }
     }
 
     /**

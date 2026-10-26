@@ -18,7 +18,7 @@ class GuardianCredentialData
         'profile.address',
         'students.profile:id,first_name,last_name,second_last_name',
         'students.currentEnrollment.classGroup.gradeLevel',
-        'students.guardians.profile:id,first_name,last_name,second_last_name',
+        'students.guardians.profile:id,first_name,last_name,second_last_name,phone_number',
     ];
 
     /** Guardians with at least one minor actively enrolled. */
@@ -73,7 +73,7 @@ class GuardianCredentialData
     /**
      * The first other guardian of any of this guardian's active minors.
      *
-     * @return array{name: string, kinship: string}|null
+     * @return array{name: string, phone: string, kinship: string}|null
      */
     public function secondGuardian(Guardian $guardian): ?array
     {
@@ -84,6 +84,7 @@ class GuardianCredentialData
             if ($other) {
                 return [
                     'name' => $other->profile->fullName(),
+                    'phone' => trim((string) ($other->profile->phone_number ?? '')),
                     'kinship' => trim((string) ($other->pivot?->relationship ?: ($other->Kinship ?? ''))),
                 ];
             }
@@ -94,6 +95,8 @@ class GuardianCredentialData
 
     /**
      * Card text values for the guardian-only fields.
+     * second_guardian is name / phone / kinship (one per line); the designer's
+     * field label is the optional prefix drawn separately.
      *
      * @return array{kinship: string, dependent: string, dependents: string, second_guardian: string}
      */
@@ -110,7 +113,10 @@ class GuardianCredentialData
             'dependent' => $lines[0] ?? '',
             'dependents' => implode("\n", $lines),
             'second_guardian' => $second
-                ? trim(($second['kinship'] !== '' ? $second['kinship'].': ' : '').$second['name'])
+                ? implode("\n", array_values(array_filter(
+                    [$second['name'], $second['phone'], $second['kinship']],
+                    fn (string $part) => $part !== ''
+                )))
                 : 'No registrado',
         ];
     }

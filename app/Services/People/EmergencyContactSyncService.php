@@ -100,11 +100,10 @@ class EmergencyContactSyncService
         $phone = trim((string) $contact->phone);
         $relationship = trim((string) ($contact->relationship ?? ''));
 
-        $namePhone = implode(' · ', array_values(array_filter([$name, $phone], fn (string $part) => $part !== '')));
-        if ($relationship === '') {
-            return $namePhone;
-        }
-
-        return $namePhone === '' ? $relationship : $namePhone."\n".$relationship;
+        // Name, phone and kinship each on their own line (label/prefix is separate in the layout).
+        return implode("\n", array_values(array_filter(
+            [$name, $phone, $relationship],
+            fn (string $part) => $part !== ''
+        )));
     }
 }

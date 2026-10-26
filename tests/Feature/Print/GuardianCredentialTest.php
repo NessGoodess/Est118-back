@@ -65,7 +65,10 @@ class GuardianCredentialTest extends TestCase
             ->firstWhere('id', $mother->id);
         $this->assertSame('Madre', $row['kinship']);
         $this->assertSame('T'.str_pad((string) $mother->id, 4, '0', STR_PAD_LEFT), $row['folio']);
-        $this->assertSame(['name' => 'MIGUEL SANCHEZ MORALES', 'kinship' => 'Padre'], $row['second_guardian']);
+        $this->assertSame(
+            ['name' => 'MIGUEL SANCHEZ MORALES', 'phone' => '', 'kinship' => 'Padre'],
+            $row['second_guardian']
+        );
     }
 
     public function test_guardian_payload_lists_every_active_minor(): void
@@ -82,6 +85,20 @@ class GuardianCredentialTest extends TestCase
         $this->assertSame('1° B · MARTINEZ, CAMILA', $payload['dependent']);
         $this->assertSame('No registrado', $payload['second_guardian']);
         $this->assertSame('guardians', $payload['holder_kind']);
+    }
+
+    public function test_second_guardian_card_field_is_name_phone_kinship_lines(): void
+    {
+        $mother = $this->guardian('PATRICIA', 'SANCHEZ', 'MORALES');
+        $father = $this->guardian('MIGUEL', 'SANCHEZ', 'MORALES');
+        $father->profile->update(['phone_number' => '722 555 1212']);
+        $student = $this->student('SANTIAGO', 'SANCHEZ', '2°', 'F');
+        $student->guardians()->attach($mother->id, ['relationship' => 'Madre']);
+        $student->guardians()->attach($father->id, ['relationship' => 'Padre']);
+
+        $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
+
+        $this->assertSame("MIGUEL SANCHEZ MORALES\n722 555 1212\nPadre", $payload['second_guardian']);
     }
 
     public function test_guardian_batch_goes_to_the_zebra_with_guardian_design(): void

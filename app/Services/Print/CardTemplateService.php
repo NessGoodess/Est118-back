@@ -518,7 +518,10 @@ class CardTemplateService
                     : 'top',
                 'rotate' => $this->normalizeRotate($field['rotate'] ?? 0),
                 'fit' => ($field['fit'] ?? 'grow') === 'shrink' ? 'shrink' : 'grow',
-                'uppercase' => (bool) ($field['uppercase'] ?? false),
+                'uppercase' => (bool) ($field['uppercase'] ?? false) && ! (bool) ($field['lowercase'] ?? false),
+                'lowercase' => (bool) ($field['lowercase'] ?? false) && ! (bool) ($field['uppercase'] ?? false),
+                'label_bold' => (bool) ($field['label_bold'] ?? false),
+                'label_break' => (bool) ($field['label_break'] ?? false),
             ];
         }
 

@@ -100,7 +100,7 @@ class GuardianCredentialTest extends TestCase
         $this->assertSame('1° A · HERNANDEZ, DIEGO', $job->payload_json['dependent']);
     }
 
-    public function test_sheet_render_returns_images_and_records_nothing(): void
+    public function test_sheet_job_renders_async_and_records_nothing(): void
     {
         if (! function_exists('imagecreatetruecolor')) {
             $this->markTestSkipped('GD is required to render cards.');
@@ -112,25 +112,42 @@ class GuardianCredentialTest extends TestCase
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
         $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
 
-        $response = $this->postJson('/api/credential-sheets/render', [
+        $started = $this->postJson('/api/credential-sheets/jobs', [
             'kind' => 'guardians',
             'ids' => [$guardian->id],
             'omit_fields' => ['second_guardian'],
-        ])->assertOk()
-            ->assertJsonPath('data.0.id', $guardian->id)
-            ->assertJsonPath('data.0.orientation', 'portrait');
+        ])->assertAccepted()
+            ->assertJsonPath('data.summary.total', 1)
+            ->assertJsonPath('data.summary.rendering', 1)
+            ->json('data.uuid');
 
-        $this->assertStringStartsWith('data:image/png;base64,', $response->json('data.0.front'));
-        $this->assertStringStartsWith('data:image/png;base64,', $response->json('data.0.back'));
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\RenderCredentialSheetCardJob::class);
+
+        app(\App\Services\Print\CredentialSheetService::class)->renderCard($started, (int) $guardian->id);
+
+        $status = $this->getJson('/api/credential-sheets/jobs/'.$started)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'ready')
+            ->assertJsonPath('data.summary.ready', 1)
+            ->assertJsonPath('data.cards.0.id', $guardian->id)
+            ->assertJsonPath('data.cards.0.orientation', 'portrait')
+            ->json('data');
+
+        $this->assertStringContainsString('/credential-sheets/jobs/', $status['cards'][0]['front']);
+        $this->assertStringContainsString('/credential-sheets/jobs/', $status['cards'][0]['back']);
         $this->assertSame(0, CredentialPrint::query()->count());
         $this->assertSame(0, PrintJob::query()->count());
+
+        $frontUrl = parse_url($status['cards'][0]['front'], PHP_URL_PATH);
+        $frontQuery = parse_url($status['cards'][0]['front'], PHP_URL_QUERY);
+        $this->get($frontUrl.'?'.$frontQuery)->assertOk();
     }
 
-    public function test_sheet_render_for_students_needs_view_students(): void
+    public function test_sheet_job_for_students_needs_view_students(): void
     {
         $this->authUser(['print credentials']);
 
-        $this->postJson('/api/credential-sheets/render', ['kind' => 'students', 'ids' => [1]])
+        $this->postJson('/api/credential-sheets/jobs', ['kind' => 'students', 'ids' => [1]])
             ->assertForbidden();
     }
 

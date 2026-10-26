@@ -215,6 +215,11 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('permission:print credentials');
     Route::post('/credential-prints/people', [PersonCredentialPrintController::class, 'store'])
         ->middleware('permission:print credentials');
+    Route::post('/credential-sheets/jobs', [CredentialSheetController::class, 'store'])
+        ->middleware('permission:view students|print credentials');
+    Route::get('/credential-sheets/jobs/{uuid}', [CredentialSheetController::class, 'show'])
+        ->middleware('permission:view students|print credentials');
+    /** @deprecated Prefer async /credential-sheets/jobs */
     Route::post('/credential-sheets/render', [CredentialSheetController::class, 'render'])
         ->middleware('permission:view students|print credentials');
 
@@ -738,5 +743,12 @@ Route::get('/private-image/{kind}/{id}', [PersonPhotoFileController::class, 'sho
     ->whereNumber('id')
     ->middleware('signed')
     ->name('private.person-image');
+
+Route::get('/credential-sheets/jobs/{uuid}/cards/{holderId}/{side}', [CredentialSheetController::class, 'asset'])
+    ->whereUuid('uuid')
+    ->whereNumber('holderId')
+    ->whereIn('side', ['front', 'back'])
+    ->middleware('signed')
+    ->name('credential-sheets.asset');
 
 require __DIR__.'/service.php';

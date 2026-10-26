@@ -16,3 +16,9 @@ Schedule::call(function () {
     ->dailyAt('00:00')
     ->name('reset-email-delay-counter')
     ->withoutOverlapping();
+
+// Plain-paper sheet PNGs live ~1h; sweep leftovers every 30 minutes.
+Schedule::command('credential-sheets:purge-expired')
+    ->everyThirtyMinutes()
+    ->name('purge-expired-credential-sheets')
+    ->withoutOverlapping();

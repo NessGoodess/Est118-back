@@ -21,13 +21,31 @@ class GuardianCredentialData
         'students.guardians.profile:id,first_name,last_name,second_last_name,phone_number',
     ];
 
-    /** Guardians with at least one minor actively enrolled. */
-    public function query(): Builder
+    /**
+     * Guardians with at least one minor actively enrolled.
+     * Optional grade/group scope: tutor appears if any child is in that scope.
+     */
+    public function query(?int $gradeId = null, ?int $groupId = null): Builder
     {
-        return Guardian::query()
+        $q = Guardian::query()
             ->whereHas('profile')
-            ->whereHas('students.currentEnrollment')
             ->with(self::RELATIONS);
+
+        if ($groupId) {
+            $q->whereHas(
+                'students.currentEnrollment',
+                fn (Builder $eq) => $eq->where('class_group_id', $groupId)
+            );
+        } elseif ($gradeId) {
+            $q->whereHas(
+                'students.currentEnrollment.classGroup',
+                fn (Builder $cg) => $cg->where('grade_level_id', $gradeId)
+            );
+        } else {
+            $q->whereHas('students.currentEnrollment');
+        }
+
+        return $q;
     }
 
     public function folio(Guardian $guardian): string

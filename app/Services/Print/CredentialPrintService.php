@@ -145,7 +145,9 @@ class CredentialPrintService
         array $ids,
         User $user,
         ?string $templateKey = null,
-        string $printerId = PrintJobService::DEFAULT_PRINTER_ID
+        string $printerId = PrintJobService::DEFAULT_PRINTER_ID,
+        PrintBatchStrategy $strategy = PrintBatchStrategy::FrontsThenBacks,
+        ?int $gradeLevelId = null
     ): array {
         $ids = array_values(array_unique(array_map('intval', $ids)));
         if ($ids === []) {
@@ -169,11 +171,16 @@ class CredentialPrintService
             ]);
         }
 
-        $design = $this->printJobs->resolveDesignForPerson($kind, $templateKey);
+        $design = $this->printJobs->resolveDesignForPerson($kind, $templateKey, $gradeLevelId);
         $facesMode = ($design->faces_mode ?? 'single') === 'double' ? 'double' : 'single';
+        if ($strategy === PrintBatchStrategy::BackOnly && $facesMode !== 'double') {
+            throw ValidationException::withMessages([
+                'strategy' => ["El diseño de {$kind->label()} no es de dos caras. No se puede encolar solo el reverso."],
+            ]);
+        }
         $batchUuid = (string) Str::uuid();
 
-        return DB::transaction(function () use ($kind, $ids, $holders, $user, $design, $facesMode, $printerId, $batchUuid) {
+        return DB::transaction(function () use ($kind, $ids, $holders, $user, $design, $facesMode, $printerId, $batchUuid, $strategy) {
             $openCards = CredentialPrint::query()
                 ->open()
                 ->where('kind', $kind->value)
@@ -208,17 +215,21 @@ class CredentialPrintService
                     ->whereNotNull('completed_at')
                     ->exists();
 
+                $frontPrinted = $strategy === PrintBatchStrategy::BackOnly;
+
                 $cards->push(CredentialPrint::query()->create([
                     'student_id' => null,
                     'profile_id' => $holder->profile_id,
                     'kind' => $kind,
                     'card_design_id' => $design->id,
                     'faces_mode' => $facesMode,
-                    'front_status' => CredentialSideStatus::Pending,
+                    'front_status' => $frontPrinted
+                        ? CredentialSideStatus::Printed
+                        : CredentialSideStatus::Pending,
                     'back_status' => $facesMode === 'double'
                         ? CredentialSideStatus::Pending
                         : CredentialSideStatus::NotApplicable,
-                    'strategy' => PrintBatchStrategy::FrontsThenBacks,
+                    'strategy' => $strategy,
                     'batch_uuid' => $batchUuid,
                     'reason' => $reprint ? CredentialPrintReason::Reprint : CredentialPrintReason::Initial,
                     'created_by' => $user->id,
@@ -226,12 +237,20 @@ class CredentialPrintService
             }
 
             if ($cards->isNotEmpty()) {
-                $this->enqueue($cards->pluck('id')->all(), 'front', $user, $printerId);
+                if ($strategy === PrintBatchStrategy::BackOnly) {
+                    $this->enqueue($cards->pluck('id')->all(), 'back', $user, $printerId);
+                } elseif ($strategy === PrintBatchStrategy::PerCard) {
+                    foreach ($cards as $card) {
+                        $this->enqueue([(int) $card->id], 'front', $user, $printerId);
+                    }
+                } else {
+                    $this->enqueue($cards->pluck('id')->all(), 'front', $user, $printerId);
+                }
             }
 
             return [
                 'batch_uuid' => $cards->isNotEmpty() ? $batchUuid : null,
-                'strategy' => PrintBatchStrategy::FrontsThenBacks,
+                'strategy' => $strategy,
                 'cards' => $cards->isNotEmpty()
                     ? $this->cardsWithRelations(
                         CredentialPrint::query()->where('batch_uuid', $batchUuid)->orderBy('id')->get()
@@ -541,6 +560,40 @@ class CredentialPrintService
         return $this->cardsWithRelations(
             CredentialPrint::query()
                 ->whereIn('student_id', $studentIds)
+                ->orderByDesc('id')
+                ->get()
+        );
+    }
+
+    /**
+     * @return Collection<int, CredentialPrint>
+     */
+    public function historyForProfile(CredentialHolderKind $kind, int $profileId): Collection
+    {
+        return $this->cardsWithRelations(
+            CredentialPrint::query()
+                ->where('kind', $kind->value)
+                ->where('profile_id', $profileId)
+                ->orderByDesc('id')
+                ->get()
+        );
+    }
+
+    /**
+     * @param  array<int, int>  $profileIds
+     * @return Collection<int, CredentialPrint>
+     */
+    public function historyForProfiles(CredentialHolderKind $kind, array $profileIds): Collection
+    {
+        $profileIds = array_values(array_unique(array_map('intval', $profileIds)));
+        if ($profileIds === []) {
+            return collect();
+        }
+
+        return $this->cardsWithRelations(
+            CredentialPrint::query()
+                ->where('kind', $kind->value)
+                ->whereIn('profile_id', $profileIds)
                 ->orderByDesc('id')
                 ->get()
         );

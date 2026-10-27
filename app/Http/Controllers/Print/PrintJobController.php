@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Print;
 
+use App\Enums\CredentialHolderKind;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\ServiceAbility;
 use App\Http\Controllers\Controller;
@@ -16,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class PrintJobController extends Controller
@@ -31,20 +33,35 @@ class PrintJobController extends Controller
     public function preview(Request $request): Response|JsonResponse
     {
         $data = $request->validate([
-            'student_id' => ['required', 'integer', 'exists:students,id'],
-            'template_key' => ['sometimes', 'string', 'max:64'],
+            'kind' => ['sometimes', 'nullable', Rule::in(['students', 'teachers', 'staff', 'guardians'])],
+            'id' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'student_id' => ['sometimes', 'nullable', 'integer', 'exists:students,id'],
+            'template_key' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'grade_id' => ['sometimes', 'nullable', 'integer', 'exists:grade_levels,id'],
         ]);
 
+        $kindValue = $data['kind'] ?? 'students';
+        $holderId = (int) ($data['id'] ?? $data['student_id'] ?? 0);
+        if ($holderId < 1) {
+            throw ValidationException::withMessages([
+                'id' => ['Indica id (o student_id para alumnos).'],
+            ]);
+        }
+
+        $kind = CredentialHolderKind::from($kindValue);
+        $templateKey = $data['template_key'] ?? null;
+        $gradeId = isset($data['grade_id']) ? (int) $data['grade_id'] : null;
+
         try {
-            $png = $this->renderer->previewPng(
-                (int) $data['student_id'],
-                $data['template_key'] ?? 'student-card-v1'
-            );
+            $png = $kind === CredentialHolderKind::Students
+                ? $this->renderer->previewPng($holderId, $templateKey ?? 'student-card-v1')
+                : $this->renderer->previewPersonPng($kind, $holderId, $templateKey, $gradeId);
         } catch (\Throwable $e) {
             Log::warning('[print] preview falló', [
                 'user_id' => $request->user()?->id,
-                'student_id' => (int) $data['student_id'],
-                'template_key' => $data['template_key'] ?? 'student-card-v1',
+                'kind' => $kind->value,
+                'id' => $holderId,
+                'template_key' => $templateKey,
                 'exception' => $e::class,
                 'error' => $e->getMessage(),
                 'file' => $e->getFile().':'.$e->getLine(),

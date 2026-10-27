@@ -155,8 +155,11 @@ class PrintJobService
         return $holder;
     }
 
-    public function resolveDesignForPerson(CredentialHolderKind $kind, ?string $preferredKey = null): CardDesign
-    {
+    public function resolveDesignForPerson(
+        CredentialHolderKind $kind,
+        ?string $preferredKey = null,
+        ?int $gradeLevelId = null
+    ): CardDesign {
         if (is_string($preferredKey) && trim($preferredKey) !== '') {
             try {
                 $design = $this->templates->findDesign($preferredKey);
@@ -168,12 +171,30 @@ class PrintJobService
             }
         }
 
-        $design = CardDesign::query()
+        $base = CardDesign::query()
             ->where('is_active', true)
-            ->where('audience', $kind->value)
+            ->where('audience', $kind->value);
+
+        if ($gradeLevelId) {
+            $match = (clone $base)
+                ->where('grade_level_id', $gradeLevelId)
+                ->orderByDesc('is_default')
+                ->orderByDesc('id')
+                ->first();
+            if ($match) {
+                return $match;
+            }
+        }
+
+        $design = (clone $base)
+            ->whereNull('grade_level_id')
             ->orderByDesc('is_default')
             ->orderByDesc('id')
-            ->first();
+            ->first()
+            ?? (clone $base)
+                ->orderByDesc('is_default')
+                ->orderByDesc('id')
+                ->first();
 
         if (! $design) {
             throw ValidationException::withMessages([

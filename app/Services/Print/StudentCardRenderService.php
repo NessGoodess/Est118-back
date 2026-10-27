@@ -90,6 +90,43 @@ class StudentCardRenderService
     }
 
     /**
+     * Preview PNG for teachers / staff / guardians (no print job).
+     */
+    public function previewPersonPng(
+        CredentialHolderKind $kind,
+        int $holderId,
+        ?string $templateKey = null,
+        ?int $gradeLevelId = null
+    ): string {
+        $model = $kind->personModel();
+        if ($model === null) {
+            throw new RuntimeException('Usa previewPng para alumnos.');
+        }
+
+        $relations = $kind === CredentialHolderKind::Guardians
+            ? GuardianCredentialData::RELATIONS
+            : ['profile.address', 'profile.emergencyContacts'];
+
+        $holder = $model::query()->with($relations)->findOrFail($holderId);
+        $design = app(PrintJobService::class)->resolveDesignForPerson($kind, $templateKey, $gradeLevelId);
+        $payload = $this->payloadFromPerson($kind, $holder);
+        $photoKind = $kind->photoKind();
+        $photoPath = $photoKind
+            ? ($this->personPhotos->resolvePath($photoKind, $holderId, 'original')
+                ?? $this->personPhotos->resolvePath($photoKind, $holderId, 'profile'))
+            : null;
+
+        $img = $this->compose((string) $design->uuid, 0, $payload, 'front', $photoPath);
+
+        ob_start();
+        imagepng($img);
+        $binary = (string) ob_get_clean();
+        imagedestroy($img);
+
+        return $binary;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function payloadFromStudent(Student $student): array

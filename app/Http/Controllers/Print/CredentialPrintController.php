@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Print;
 
+use App\Enums\CredentialHolderKind;
 use App\Enums\PrintBatchStrategy;
 use App\Enums\PrintJobStatus;
 use App\Http\Controllers\Controller;
@@ -16,6 +17,7 @@ use App\Services\Print\CredentialPrintService;
 use App\Services\Print\PrintJobService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class CredentialPrintController extends Controller
@@ -110,6 +112,30 @@ class CredentialPrintController extends Controller
         ]);
     }
 
+    public function latestByProfiles(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'kind' => ['required', Rule::in(['teachers', 'staff', 'guardians', 'students'])],
+            'profile_ids' => ['required'],
+        ]);
+        $kind = CredentialHolderKind::from($data['kind']);
+        $raw = $request->query('profile_ids', []);
+        $ids = is_array($raw)
+            ? $raw
+            : preg_split('/\s*,\s*/', (string) $raw, -1, PREG_SPLIT_NO_EMPTY);
+
+        $latest = $this->cards->latestByProfileIds($kind, $ids);
+        $out = [];
+        foreach ($latest as $profileId => $card) {
+            $out[(string) $profileId] = $this->serializeCard($card);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $out,
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         if ($request->filled('student_id')) {
@@ -120,9 +146,19 @@ class CredentialPrintController extends Controller
                 ? $raw
                 : preg_split('/\s*,\s*/', (string) $raw, -1, PREG_SPLIT_NO_EMPTY);
             $cards = $this->cards->historyForStudents($ids);
+        } elseif ($request->filled('profile_id') && $request->filled('kind')) {
+            $kind = CredentialHolderKind::from((string) $request->query('kind'));
+            $cards = $this->cards->historyForProfile($kind, (int) $request->integer('profile_id'));
+        } elseif ($request->filled('profile_ids') && $request->filled('kind')) {
+            $kind = CredentialHolderKind::from((string) $request->query('kind'));
+            $raw = $request->query('profile_ids');
+            $ids = is_array($raw)
+                ? $raw
+                : preg_split('/\s*,\s*/', (string) $raw, -1, PREG_SPLIT_NO_EMPTY);
+            $cards = $this->cards->historyForProfiles($kind, $ids);
         } else {
             throw ValidationException::withMessages([
-                'student_id' => ['Indica student_id o student_ids.'],
+                'student_id' => ['Indica student_id, student_ids, o kind+profile_id(s).'],
             ]);
         }
 

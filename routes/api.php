@@ -156,27 +156,27 @@ Route::prefix('agent')->middleware([
  */
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('/print-jobs', [PrintJobController::class, 'index'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::get('/print-jobs/latest-by-students', [PrintJobController::class, 'latestByStudents'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::get('/print-jobs/preview', [PrintJobController::class, 'preview'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::get('/print-jobs/queue', [PrintJobController::class, 'queue'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::post('/print-jobs/resolve', [PrintJobController::class, 'resolve'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::post('/print-jobs/cancel-queue', [PrintJobController::class, 'cancelQueue'])
-        ->middleware('permission:edit students');
+        ->middleware('permission:edit students|print credentials');
     Route::post('/print-jobs/resume', [PrintJobController::class, 'resume'])
-        ->middleware('permission:edit students');
+        ->middleware('permission:edit students|print credentials');
     Route::post('/print-jobs', [PrintJobController::class, 'store'])
         ->middleware('permission:edit students');
     Route::get('/print-jobs/{printJob}', [PrintJobController::class, 'show'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::post('/print-jobs/{printJob}/cancel', [PrintJobController::class, 'cancel'])
-        ->middleware('permission:edit students');
+        ->middleware('permission:edit students|print credentials');
     Route::get('/print-agent/status', [PrintJobController::class, 'agentStatus'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
 
     Route::get('/nfc-assignments/active', [NfcAssignmentController::class, 'active'])
         ->middleware('permission:view students');
@@ -196,21 +196,23 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
      * ___________________________________________________________________________
      */
     Route::get('/credential-prints', [CredentialPrintController::class, 'index'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::get('/credential-prints/pending', [CredentialPrintController::class, 'pending'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::get('/credential-prints/latest-by-students', [CredentialPrintController::class, 'latestByStudents'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
+    Route::get('/credential-prints/latest-by-profiles', [CredentialPrintController::class, 'latestByProfiles'])
+        ->middleware('permission:view students|print credentials');
     Route::get('/credential-prints/batches/{batchUuid}', [CredentialPrintController::class, 'batch'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::post('/credential-prints', [CredentialPrintController::class, 'store'])
         ->middleware('permission:edit students');
     Route::post('/credential-prints/enqueue', [CredentialPrintController::class, 'enqueue'])
-        ->middleware('permission:edit students');
+        ->middleware('permission:edit students|print credentials');
     Route::post('/credential-prints/discard', [CredentialPrintController::class, 'discard'])
-        ->middleware('permission:edit students');
+        ->middleware('permission:edit students|print credentials');
     Route::post('/credential-prints/mark-side', [CredentialPrintController::class, 'markSide'])
-        ->middleware('permission:edit students');
+        ->middleware('permission:edit students|print credentials');
     Route::get('/credential-prints/people', [PersonCredentialPrintController::class, 'index'])
         ->middleware('permission:print credentials');
     Route::post('/credential-prints/people', [PersonCredentialPrintController::class, 'store'])
@@ -578,10 +580,10 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
         ->middleware('permission:view students');
 
     Route::get('/grades', [GradeLevelController::class, 'index'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
 
     Route::get('/academic-years', [StudentController::class, 'academicYears'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
 
     Route::get('/search', [StudentController::class, 'search'])
         ->middleware('permission:edit students|edit pre-enrollments|edit admission enrollment');
@@ -600,7 +602,7 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
     Route::prefix('credentials')->group(function () {
         Route::get('grades/{grade}/class-groups', [StudentCredentialPrintingController::class, 'classGroupsForGrade'])
             ->whereNumber('grade')
-            ->middleware('permission:view students');
+            ->middleware('permission:view students|print credentials');
         Route::get('class-groups/{classGroup}/rows', [StudentCredentialPrintingController::class, 'rows'])
             ->middleware('permission:view students');
         Route::get('class-groups/{classGroup}/export', [StudentCredentialPrintingController::class, 'exportExcel'])

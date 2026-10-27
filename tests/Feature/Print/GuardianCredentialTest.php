@@ -117,6 +117,97 @@ class GuardianCredentialTest extends TestCase
         $this->assertSame('1° A · HERNANDEZ, DIEGO', $job->payload_json['dependent']);
     }
 
+    public function test_guardians_index_filters_by_grade_and_group(): void
+    {
+        $mother = $this->guardian('PATRICIA', 'SANCHEZ', 'MORALES');
+        $onlyFirst = $this->guardian('SOLO', 'PRIMERO', null);
+        $camila = $this->student('CAMILA', 'SANCHEZ', '1°', 'B');
+        $mateo = $this->student('MATEO', 'SANCHEZ', '3°', 'E');
+        $diego = $this->student('DIEGO', 'PRIMERO', '1°', 'B');
+        $camila->guardians()->attach($mother->id, ['relationship' => 'Madre']);
+        $mateo->guardians()->attach($mother->id, ['relationship' => 'Madre']);
+        $diego->guardians()->attach($onlyFirst->id, ['relationship' => 'Madre']);
+
+        $grade1 = GradeLevel::query()->where('name', '1°')->value('id');
+        $grade3 = GradeLevel::query()->where('name', '3°')->value('id');
+        $group1B = ClassGroup::query()
+            ->where('grade_level_id', $grade1)
+            ->where('name', 'B')
+            ->value('id');
+
+        $this->getJson('/api/credential-prints/people?kind=guardians&grade_id='.$grade1)
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $this->getJson('/api/credential-prints/people?kind=guardians&grade_id='.$grade3)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $mother->id);
+
+        $this->getJson('/api/credential-prints/people?kind=guardians&group_id='.$group1B)
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        // Multi-grade tutor still lists every dependent on the card row.
+        $row = collect($this->getJson('/api/credential-prints/people?kind=guardians&grade_id='.$grade3)->json('data'))
+            ->firstWhere('id', $mother->id);
+        $this->assertCount(2, $row['dependents']);
+    }
+
+    public function test_guardian_batch_uses_grade_design_or_template_key(): void
+    {
+        $grade1 = GradeLevel::query()->firstOrCreate(['name' => '1°']);
+        $grade3 = GradeLevel::query()->firstOrCreate(['name' => '3°']);
+        $fallback = $this->design('guardians', 'single');
+        $design1 = $this->design('guardians', 'double', $grade1->id, 'Gafete tutores 1');
+        $design3 = $this->design('guardians', 'double', $grade3->id, 'Gafete tutores 3');
+
+        $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
+        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+
+        $this->postJson('/api/credential-prints/people', [
+            'kind' => 'guardians',
+            'ids' => [$guardian->id],
+            'grade_id' => $grade1->id,
+        ])->assertStatus(202)
+            ->assertJsonPath('data.cards.0.design_key', $design1->uuid);
+
+        CredentialPrint::query()->delete();
+        PrintJob::query()->delete();
+
+        $this->postJson('/api/credential-prints/people', [
+            'kind' => 'guardians',
+            'ids' => [$guardian->id],
+            'template_key' => $design3->uuid,
+            'grade_id' => $grade1->id,
+        ])->assertStatus(202)
+            ->assertJsonPath('data.cards.0.design_key', $design3->uuid);
+
+        $this->assertNotSame($fallback->uuid, $design1->uuid);
+    }
+
+    public function test_guardian_preview_accepts_grade_and_template(): void
+    {
+        if (! function_exists('imagecreatetruecolor')) {
+            $this->markTestSkipped('GD is required to render cards.');
+        }
+        Storage::fake('private');
+        Storage::fake('public');
+
+        $grade1 = GradeLevel::query()->firstOrCreate(['name' => '1°']);
+        $design = $this->design('guardians', 'single', $grade1->id);
+        $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
+        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+
+        $this->get('/api/print-jobs/preview?'.http_build_query([
+            'kind' => 'guardians',
+            'id' => $guardian->id,
+            'grade_id' => $grade1->id,
+            'template_key' => $design->uuid,
+        ]))->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+    }
+
     public function test_sheet_job_renders_async_and_records_nothing(): void
     {
         if (! function_exists('imagecreatetruecolor')) {
@@ -254,14 +345,19 @@ class GuardianCredentialTest extends TestCase
         return $student;
     }
 
-    private function design(string $audience, string $faces): CardDesign
-    {
+    private function design(
+        string $audience,
+        string $faces,
+        ?int $gradeLevelId = null,
+        ?string $name = null
+    ): CardDesign {
         return CardDesign::query()->create([
             'user_id' => $this->user->id,
-            'name' => "Gafete {$audience}",
+            'name' => $name ?? "Gafete {$audience}",
             'audience' => $audience,
             'faces_mode' => $faces,
             'orientation' => 'portrait',
+            'grade_level_id' => $gradeLevelId,
             'is_active' => true,
             'is_default' => true,
         ]);

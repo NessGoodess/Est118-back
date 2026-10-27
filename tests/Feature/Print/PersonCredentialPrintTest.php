@@ -164,7 +164,25 @@ class PersonCredentialPrintTest extends TestCase
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $active->id)
             ->assertJsonPath('data.0.name', 'ANA LOPEZ')
+            ->assertJsonPath('data.0.has_photo', false)
+            ->assertJsonPath('data.0.photo_url', null)
             ->assertJsonPath('data.0.latest_card.kind', 'teachers');
+
+        $this->getJson('/api/credential-prints?kind=teachers&profile_id='.$active->profile_id)
+            ->assertOk()
+            ->assertJsonPath('data.0.kind', 'teachers')
+            ->assertJsonPath('data.0.profile_id', $active->profile_id);
+
+        $this->getJson('/api/credential-prints/latest-by-profiles?kind=teachers&profile_ids[]='.$active->profile_id)
+            ->assertOk()
+            ->assertJsonPath('data.'.$active->profile_id.'.kind', 'teachers');
+    }
+
+    public function test_print_credentials_can_access_shared_queue_and_enqueue_routes(): void
+    {
+        $this->getJson('/api/print-jobs/queue')->assertOk();
+        $this->getJson('/api/print-agent/status')->assertOk();
+        $this->getJson('/api/credential-prints/pending')->assertOk();
     }
 
     public function test_print_credentials_permission_is_required(): void

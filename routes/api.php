@@ -219,6 +219,8 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
         ->middleware('permission:view students|print credentials');
     Route::get('/credential-sheets/jobs/{uuid}', [CredentialSheetController::class, 'show'])
         ->middleware('permission:view students|print credentials');
+    Route::post('/credential-sheets/jobs/{uuid}/cancel', [CredentialSheetController::class, 'cancel'])
+        ->middleware('permission:view students|print credentials');
     /** @deprecated Prefer async /credential-sheets/jobs */
     Route::post('/credential-sheets/render', [CredentialSheetController::class, 'render'])
         ->middleware('permission:view students|print credentials');

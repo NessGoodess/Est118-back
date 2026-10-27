@@ -50,6 +50,15 @@ class CredentialSheetController extends Controller
         ]);
     }
 
+    /** Stop rendering remaining cards; queued workers exit early. */
+    public function cancel(Request $request, string $uuid): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->sheets->cancel($uuid, (int) $request->user()->id),
+        ]);
+    }
+
     /** Temporary signed URL — no session; expires with the sheet job (~1h). */
     public function asset(string $uuid, int $holderId, string $side): BinaryFileResponse|Response
     {

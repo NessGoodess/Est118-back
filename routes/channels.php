@@ -31,6 +31,17 @@ Broadcast::channel('print-jobs', function ($user) {
     return $user->can('view students');
 });
 
+// Private channel for plain-paper sheet job progress (owner only)
+//Canal privado para el progreso de la impresión de la hoja de credenciales
+Broadcast::channel('credential-sheets.{uuid}', function ($user, string $uuid) {
+    $job = \Illuminate\Support\Facades\Cache::get('credential-sheet-job:'.$uuid);
+    if (! is_array($job)) {
+        return false;
+    }
+
+    return (int) ($job['user_id'] ?? 0) === (int) $user->id;
+});
+
 // Canal de equipo para preinscripciones (base para chat futuro entre usuarios del módulo)
 Broadcast::channel('team.pre-enrollments', function ($user) {
     return $user->can('view pre-enrollments') ? [

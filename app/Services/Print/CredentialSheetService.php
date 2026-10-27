@@ -3,11 +3,13 @@
 namespace App\Services\Print;
 
 use App\Enums\CredentialHolderKind;
+use App\Events\CredentialSheetCardUpdated;
 use App\Jobs\RenderCredentialSheetCardJob;
 use App\Models\CardDesign;
 use App\Services\People\GuardianCredentialData;
 use App\Services\People\PersonPhotoPathService;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -66,6 +68,7 @@ class CredentialSheetService
             'kind' => $kind->value,
             'omit_fields' => $omitFields,
             'ids' => $ids,
+            'status' => 'processing',
             'created_at' => $now->toIso8601String(),
             'expires_at' => $now->copy()->addSeconds(self::TTL_SECONDS)->toIso8601String(),
             'cards' => $cards,
@@ -100,14 +103,45 @@ class CredentialSheetService
     {
         $job = $this->jobOrFail($uuid, $userId);
         $summary = $this->summaryFrom($job);
+        $cancelled = ($job['status'] ?? '') === 'cancelled';
 
         return [
             'uuid' => $uuid,
-            'status' => $this->overallStatus($summary),
+            'status' => $cancelled ? 'cancelled' : $this->overallStatus($summary),
             'expires_at' => $job['expires_at'],
             'summary' => $summary,
             'cards' => $this->publicCards($job),
         ];
+    }
+
+    /**
+     * Mark the batch cancelled so queued workers exit without rendering.
+     * Best-effort disk cleanup; cache kept briefly so late jobs see the flag.
+     *
+     * @return array{uuid: string, status: string}
+     */
+    public function cancel(string $uuid, int $userId): array
+    {
+        $job = $this->jobOrFail($uuid, $userId);
+        if (($job['status'] ?? '') === 'cancelled') {
+            return ['uuid' => $uuid, 'status' => 'cancelled'];
+        }
+
+        $job['status'] = 'cancelled';
+        $expiresAt = \Carbon\Carbon::parse($job['expires_at']);
+        $remaining = max(60, (int) now()->diffInSeconds($expiresAt, false));
+        Cache::put($this->cacheKey($uuid), $job, $remaining);
+
+        try {
+            Storage::disk(self::DISK)->deleteDirectory(self::STORAGE_PREFIX.'/'.$uuid);
+        } catch (\Throwable $e) {
+            Log::warning('Credential sheet cancel cleanup failed', [
+                'uuid' => $uuid,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return ['uuid' => $uuid, 'status' => 'cancelled'];
     }
 
     public function absolutePath(string $uuid, int $holderId, string $side): string
@@ -137,7 +171,7 @@ class CredentialSheetService
         @ini_set('memory_limit', '512M');
 
         $job = Cache::get($this->cacheKey($uuid));
-        if (! is_array($job)) {
+        if (! is_array($job) || ($job['status'] ?? '') === 'cancelled') {
             return;
         }
 
@@ -153,11 +187,23 @@ class CredentialSheetService
                 $payload[$key] = '';
             }
 
+            // User may have cancelled while resolving design/payload.
+            if ($this->isCancelled($uuid)) {
+                return;
+            }
+
             $double = ($design->faces_mode ?? 'single') === 'double';
             $frontRel = $this->storePng($uuid, $holderId, 'front', $design->uuid, $studentId, $payload, $photoPath);
+            if ($this->isCancelled($uuid)) {
+                return;
+            }
             $backRel = $double
                 ? $this->storePng($uuid, $holderId, 'back', $design->uuid, $studentId, $payload, $photoPath)
                 : null;
+
+            if ($this->isCancelled($uuid)) {
+                return;
+            }
 
             $this->patchCard($uuid, $holderId, [
                 'status' => 'ready',
@@ -169,11 +215,16 @@ class CredentialSheetService
                 'back_path' => $backRel,
                 'error' => null,
             ]);
+            $this->broadcastCard($uuid, $holderId);
         } catch (\Throwable $e) {
+            if ($this->isCancelled($uuid)) {
+                return;
+            }
             $this->patchCard($uuid, $holderId, [
                 'status' => 'failed',
                 'error' => $e->getMessage(),
             ]);
+            $this->broadcastCard($uuid, $holderId);
             throw $e;
         }
     }
@@ -459,6 +510,48 @@ class CredentialSheetService
     private function cacheKey(string $uuid): string
     {
         return 'credential-sheet-job:'.$uuid;
+    }
+
+    private function isCancelled(string $uuid): bool
+    {
+        $job = Cache::get($this->cacheKey($uuid));
+
+        return ! is_array($job) || ($job['status'] ?? '') === 'cancelled';
+    }
+
+    /** Echo shortcut; never fail the render path if Reverb is down. */
+    private function broadcastCard(string $uuid, int $holderId): void
+    {
+        try {
+            $job = Cache::get($this->cacheKey($uuid));
+            if (! is_array($job) || ($job['status'] ?? '') === 'cancelled') {
+                return;
+            }
+            $summary = $this->summaryFrom($job);
+            $public = $this->publicCards($job);
+            $card = null;
+            foreach ($public as $row) {
+                if ((int) $row['id'] === $holderId) {
+                    $card = $row;
+                    break;
+                }
+            }
+            if ($card === null) {
+                return;
+            }
+            broadcast(new CredentialSheetCardUpdated(
+                $uuid,
+                $card,
+                $summary,
+                $this->overallStatus($summary),
+            ));
+        } catch (\Throwable $e) {
+            Log::warning('Credential sheet broadcast failed', [
+                'uuid' => $uuid,
+                'holder_id' => $holderId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function signedAssetUrl(string $uuid, int $holderId, string $side, \DateTimeInterface $expiresAt): string

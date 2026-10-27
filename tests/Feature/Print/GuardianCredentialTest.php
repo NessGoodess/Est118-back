@@ -124,6 +124,7 @@ class GuardianCredentialTest extends TestCase
         }
         Storage::fake('private');
         Storage::fake('public');
+        \Illuminate\Support\Facades\Event::fake([\App\Events\CredentialSheetCardUpdated::class]);
 
         $this->design('guardians', 'double');
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
@@ -155,9 +156,47 @@ class GuardianCredentialTest extends TestCase
         $this->assertSame(0, CredentialPrint::query()->count());
         $this->assertSame(0, PrintJob::query()->count());
 
+        \Illuminate\Support\Facades\Event::assertDispatched(\App\Events\CredentialSheetCardUpdated::class);
+
         $frontUrl = parse_url($status['cards'][0]['front'], PHP_URL_PATH);
         $frontQuery = parse_url($status['cards'][0]['front'], PHP_URL_QUERY);
         $this->get($frontUrl.'?'.$frontQuery)->assertOk();
+    }
+
+    public function test_sheet_job_cancel_stops_further_renders(): void
+    {
+        if (! function_exists('imagecreatetruecolor')) {
+            $this->markTestSkipped('GD is required to render cards.');
+        }
+        Storage::fake('private');
+        Storage::fake('public');
+        \Illuminate\Support\Facades\Event::fake([\App\Events\CredentialSheetCardUpdated::class]);
+
+        $this->design('guardians', 'double');
+        $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
+        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+
+        $uuid = $this->postJson('/api/credential-sheets/jobs', [
+            'kind' => 'guardians',
+            'ids' => [$guardian->id],
+        ])->assertAccepted()->json('data.uuid');
+
+        $this->postJson('/api/credential-sheets/jobs/'.$uuid.'/cancel')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'cancelled');
+
+        $this->getJson('/api/credential-sheets/jobs/'.$uuid)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'cancelled');
+
+        app(\App\Services\Print\CredentialSheetService::class)->renderCard($uuid, (int) $guardian->id);
+
+        $this->getJson('/api/credential-sheets/jobs/'.$uuid)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'cancelled')
+            ->assertJsonPath('data.summary.ready', 0);
+
+        \Illuminate\Support\Facades\Event::assertNotDispatched(\App\Events\CredentialSheetCardUpdated::class);
     }
 
     public function test_sheet_job_for_students_needs_view_students(): void

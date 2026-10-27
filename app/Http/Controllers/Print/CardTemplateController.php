@@ -180,7 +180,15 @@ class CardTemplateController extends Controller
             return response()->json(['success' => false, 'message' => 'Sin fondo.'], 404);
         }
 
+        $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            default => mime_content_type($path) ?: 'application/octet-stream',
+        };
+
         return response()->file($path, [
+            'Content-Type' => $mime,
             'Cache-Control' => 'no-store, private',
         ]);
     }
@@ -218,7 +226,16 @@ class CardTemplateController extends Controller
             return response()->json(['success' => false, 'message' => 'Sin imagen.'], 404);
         }
 
+        $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            default => mime_content_type($path) ?: 'application/octet-stream',
+        };
+
         return response()->file($path, [
+            'Content-Type' => $mime,
             'Cache-Control' => 'no-store, private',
         ]);
     }

@@ -13,7 +13,7 @@ use RuntimeException;
 class GuardianCurpMergeService
 {
     /**
-     * @param  array{first_name: string, last_name: string, national_id?: string|null, relationship?: string|null, email?: string|null, phone?: string|null}  $data
+     * @param  array{first_name: string, last_name: string, second_last_name?: string|null, national_id?: string|null, relationship?: string|null, email?: string|null, phone?: string|null}  $data
      */
     public function updateGuardianOrConflict(Student $student, Guardian $guardian, array $data): Student
     {
@@ -58,10 +58,14 @@ class GuardianCurpMergeService
             }
         }
 
+        $second = array_key_exists('second_last_name', $data)
+            ? trim((string) ($data['second_last_name'] ?? ''))
+            : (string) ($profile->second_last_name ?? '');
+
         $profile->fill([
             'first_name' => trim($data['first_name']),
             'last_name' => trim($data['last_name']),
-            'second_last_name' => null,
+            'second_last_name' => $second !== '' ? $second : null,
             'email' => $data['email'] ?? null,
             'phone_number' => $data['phone'] ?? null,
             'national_id' => $curp === '' ? null : $curp,

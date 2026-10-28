@@ -245,11 +245,11 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     });
 
     Route::get('/card-templates', [CardTemplateController::class, 'index'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::post('/card-templates', [CardTemplateController::class, 'store'])
         ->middleware('permission:edit students');
     Route::get('/card-templates/{template}', [CardTemplateController::class, 'show'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::put('/card-templates/{template}', [CardTemplateController::class, 'update'])
         ->middleware('permission:edit students');
     Route::delete('/card-templates/{template}', [CardTemplateController::class, 'destroy'])
@@ -259,11 +259,11 @@ Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::delete('/card-templates/{template}/background', [CardTemplateController::class, 'deleteBackground'])
         ->middleware('permission:edit students');
     Route::get('/card-templates/{template}/background', [CardTemplateController::class, 'background'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
     Route::post('/card-templates/{template}/assets', [CardTemplateController::class, 'uploadAsset'])
         ->middleware('permission:edit students');
     Route::get('/card-templates/{template}/assets/{filename}', [CardTemplateController::class, 'asset'])
-        ->middleware('permission:view students');
+        ->middleware('permission:view students|print credentials');
 
     Route::get('/downloads/zc300-agent/latest', [Zc300AgentDownloadController::class, 'latest'])
         ->middleware('permission:view students');
@@ -655,6 +655,11 @@ Route::prefix('students')->middleware('auth:sanctum', 'verified')->group(functio
         ->middleware('permission:edit students');
 
     Route::patch('/{student}/guardians/{guardian}', [StudentController::class, 'updateGuardian'])
+        ->whereNumber('student')
+        ->whereNumber('guardian')
+        ->middleware('permission:edit students');
+
+    Route::delete('/{student}/guardians/{guardian}', [StudentController::class, 'destroyGuardian'])
         ->whereNumber('student')
         ->whereNumber('guardian')
         ->middleware('permission:edit students');

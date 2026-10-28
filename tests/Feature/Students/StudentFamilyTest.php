@@ -117,6 +117,36 @@ class StudentFamilyTest extends TestCase
             ->assertJsonPath('canonical.guardian_id', $canonical->id);
     }
 
+    public function test_update_guardian_persists_paternal_and_maternal(): void
+    {
+        $this->actingEditor();
+        $student = $this->student('ANA', 'TORRES');
+        $guardian = $this->guardian('ROSA', 'LOPEZ', null);
+        $student->guardians()->syncWithoutDetaching([$guardian->id => ['relationship' => 'Madre']]);
+
+        $this->patchJson("/api/students/{$student->id}/guardians/{$guardian->id}", [
+            'first_name' => 'Rosa',
+            'last_name' => 'Lopez',
+            'second_last_name' => 'Garcia',
+            'relationship' => 'Madre',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.guardians.0.last_name', 'Lopez')
+            ->assertJsonPath('data.guardians.0.second_last_name', 'Garcia');
+
+        $this->assertSame('Lopez', $guardian->fresh()->profile->last_name);
+        $this->assertSame('Garcia', $guardian->fresh()->profile->second_last_name);
+
+        // Omitting second_last_name keeps the existing maternal surname.
+        $this->patchJson("/api/students/{$student->id}/guardians/{$guardian->id}", [
+            'first_name' => 'Rosa Maria',
+            'last_name' => 'Lopez',
+            'relationship' => 'Madre',
+        ])->assertOk();
+
+        $this->assertSame('Garcia', $guardian->fresh()->profile->second_last_name);
+    }
+
     public function test_merge_guardian_by_curp(): void
     {
         $this->actingEditor();
@@ -217,6 +247,43 @@ class StudentFamilyTest extends TestCase
         $this->assertStringContainsString('JUAN', $names);
         $this->assertStringContainsString('PEREZ', $names);
         $this->assertStringNotContainsString('GARCIA', $names);
+    }
+
+    public function test_detach_guardian_unlinks_only_this_student_and_promotes_primary(): void
+    {
+        $this->actingEditor();
+        $student = $this->student('ANA', 'TORRES');
+        $sibling = $this->student('LUIS', 'TORRES');
+        $mother = $this->guardian('ROSA', 'LOPEZ', null);
+        $father = $this->guardian('CARLOS', 'MORA', null);
+
+        $student->guardians()->syncWithoutDetaching([
+            $mother->id => ['relationship' => 'Madre', 'is_primary' => true, 'sort_order' => 0],
+            $father->id => ['relationship' => 'Padre', 'is_primary' => false, 'sort_order' => 1],
+        ]);
+        $sibling->guardians()->syncWithoutDetaching([
+            $mother->id => ['relationship' => 'Madre', 'is_primary' => true, 'sort_order' => 0],
+        ]);
+
+        $this->deleteJson("/api/students/{$student->id}/guardians/{$mother->id}")
+            ->assertOk()
+            ->assertJsonPath('data.guardians.0.id', $father->id)
+            ->assertJsonPath('data.guardians.0.is_primary', true);
+
+        $this->assertFalse($student->fresh()->guardians()->whereKey($mother->id)->exists());
+        $this->assertTrue($student->fresh()->guardians()->whereKey($father->id)->exists());
+        $this->assertTrue($sibling->fresh()->guardians()->whereKey($mother->id)->exists());
+        $this->assertDatabaseHas('guardians', ['id' => $mother->id]);
+    }
+
+    public function test_detach_guardian_not_linked_is_rejected(): void
+    {
+        $this->actingEditor();
+        $student = $this->student('ANA', 'TORRES');
+        $guardian = $this->guardian('ROSA', 'LOPEZ', null);
+
+        $this->deleteJson("/api/students/{$student->id}/guardians/{$guardian->id}")
+            ->assertUnprocessable();
     }
 
     private function student(string $first, string $last): Student

@@ -171,11 +171,44 @@ class StudentsService
     }
 
     /**
-     * @param  array{first_name: string, last_name: string, national_id?: string|null, relationship?: string|null, email?: string|null, phone?: string|null}  $data
+     * @param  array{first_name: string, last_name: string, second_last_name?: string|null, national_id?: string|null, relationship?: string|null, email?: string|null, phone?: string|null}  $data
      */
     public function updateGuardian(Student $student, Guardian $guardian, array $data): Student
     {
         return app(GuardianCurpMergeService::class)->updateGuardianOrConflict($student, $guardian, $data);
+    }
+
+    /**
+     * Unlink a guardian from this student only (does not delete the guardian record).
+     * If the removed tutor was primary, promote the next remaining one.
+     * Desvincular un tutor de este alumno solo (no elimina el registro del tutor).
+     */
+    public function detachGuardian(Student $student, Guardian $guardian): Student
+    {
+        return DB::transaction(function () use ($student, $guardian) {
+            $linked = $student->guardians()->where('guardians.id', $guardian->id)->first();
+            if (! $linked) {
+                throw new RuntimeException('Este tutor no está vinculado a este alumno.');
+            }
+
+            $wasPrimary = (bool) ($linked->pivot->is_primary ?? false);
+            $student->guardians()->detach($guardian->id);
+
+            if ($wasPrimary) {
+                $next = $student->guardians()->first();
+                if ($next) {
+                    DB::table('guardian_student')
+                        ->where('student_id', $student->id)
+                        ->update(['is_primary' => false]);
+                    DB::table('guardian_student')
+                        ->where('student_id', $student->id)
+                        ->where('guardian_id', $next->id)
+                        ->update(['is_primary' => true]);
+                }
+            }
+
+            return $this->findForDetail($student->id);
+        });
     }
 
     public function listIndex(): Collection

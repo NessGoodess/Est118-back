@@ -151,6 +151,27 @@ class StudentController extends Controller
     }
 
     /**
+     * Unlink a guardian from this student (keeps the guardian if linked elsewhere).
+     * Desvincular un tutor de este alumno (mantiene el tutor si está vinculado en otro lugar).
+     */
+    public function destroyGuardian(Student $student, Guardian $guardian): JsonResponse
+    {
+        try {
+            $updated = $this->studentsService->detachGuardian($student, $guardian);
+        } catch (RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => (new StudentDetailResource($updated))->resolve(),
+        ]);
+    }
+
+    /**
      * Search enrolled students by name/CURP (and optional grade/group filters).
      */
     public function search(Request $request): JsonResponse

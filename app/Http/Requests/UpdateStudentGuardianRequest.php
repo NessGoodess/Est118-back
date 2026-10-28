@@ -18,11 +18,19 @@ class UpdateStudentGuardianRequest extends FormRequest
         $email = trim((string) $this->input('email', ''));
         $phone = trim((string) $this->input('phone', ''));
 
-        $this->merge([
+        $merge = [
             'national_id' => $curp === '' ? null : $curp,
             'email' => $email === '' ? null : $email,
             'phone' => $phone === '' ? null : $phone,
-        ]);
+        ];
+
+        // Only normalize when the client sends it, so omitted field keeps existing maternal.
+        if ($this->exists('second_last_name')) {
+            $second = trim((string) $this->input('second_last_name'));
+            $merge['second_last_name'] = $second === '' ? null : $second;
+        }
+
+        $this->merge($merge);
     }
 
     /**
@@ -34,6 +42,7 @@ class UpdateStudentGuardianRequest extends FormRequest
         return [
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
+            'second_last_name' => ['nullable', 'string', 'max:100'],
             'national_id' => [
                 'nullable',
                 'string',

@@ -23,16 +23,27 @@ class RenderCredentialSheetCardJob implements ShouldQueue
     public function __construct(
         public string $sheetUuid,
         public int $holderId,
+        public ?string $templateKey = null,
+        public ?int $gradeLevelId = null,
+        public ?string $designUuid = null,
     ) {}
 
     public function handle(CredentialSheetService $sheets): void
     {
         try {
-            $sheets->renderCard($this->sheetUuid, $this->holderId);
+            $sheets->renderCard(
+                $this->sheetUuid,
+                $this->holderId,
+                $this->templateKey,
+                $this->gradeLevelId,
+                $this->designUuid,
+            );
         } catch (\Throwable $e) {
             Log::error('RenderCredentialSheetCardJob failed', [
                 'sheet_uuid' => $this->sheetUuid,
                 'holder_id' => $this->holderId,
+                'template_key' => $this->templateKey,
+                'design_uuid' => $this->designUuid,
                 'error' => $e->getMessage(),
             ]);
 

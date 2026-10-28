@@ -61,12 +61,16 @@ class CredentialSheetService
 
         $omitFields = array_values(array_unique(array_map('strval', $omitFields)));
         $templateKey = is_string($templateKey) && trim($templateKey) !== '' ? trim($templateKey) : null;
+        // Lock the design once for person batches so queue workers cannot fall back to "latest".
+        $designUuid = $kind === CredentialHolderKind::Students
+            ? null
+            : $this->printJobs->resolveDesignForPerson($kind, $templateKey, $gradeLevelId)->uuid;
         $uuid = (string) Str::uuid();
         $now = now();
         $cards = [];
         // Resolve name/orientation/faces up front so the UI skeleton matches the real card size.
         foreach ($ids as $id) {
-            $cards[(string) $id] = $this->pendingMeta($kind, $id, $templateKey, $gradeLevelId);
+            $cards[(string) $id] = $this->pendingMeta($kind, $id, $templateKey, $gradeLevelId, $designUuid);
         }
 
         $payload = [
@@ -75,6 +79,7 @@ class CredentialSheetService
             'kind' => $kind->value,
             'omit_fields' => $omitFields,
             'template_key' => $templateKey,
+            'design_uuid' => $designUuid,
             'grade_level_id' => $gradeLevelId,
             'ids' => $ids,
             'status' => 'processing',
@@ -89,7 +94,8 @@ class CredentialSheetService
         foreach ($ids as $id) {
             // No DB rows to wait on (cache + files only); skip afterCommit so tests with
             // RefreshDatabase still see the push immediately.
-            RenderCredentialSheetCardJob::dispatch($uuid, $id);
+            // Pass design on the job so workers do not re-resolve a different template.
+            RenderCredentialSheetCardJob::dispatch($uuid, $id, $templateKey, $gradeLevelId, $designUuid);
         }
 
         return [
@@ -175,8 +181,13 @@ class CredentialSheetService
      * Render one holder into private storage and update the job cache.
      * Called from {@see RenderCredentialSheetCardJob}.
      */
-    public function renderCard(string $uuid, int $holderId): void
-    {
+    public function renderCard(
+        string $uuid,
+        int $holderId,
+        ?string $templateKey = null,
+        ?int $gradeLevelId = null,
+        ?string $designUuid = null,
+    ): void {
         @ini_set('memory_limit', '512M');
 
         $job = Cache::get($this->cacheKey($uuid));
@@ -186,10 +197,16 @@ class CredentialSheetService
 
         $kind = CredentialHolderKind::from((string) $job['kind']);
         $omitFields = $job['omit_fields'] ?? [];
-        $templateKey = isset($job['template_key']) && is_string($job['template_key']) && $job['template_key'] !== ''
-            ? $job['template_key']
-            : null;
-        $gradeLevelId = isset($job['grade_level_id']) ? (int) $job['grade_level_id'] : null;
+        $templateKey = (is_string($templateKey) && $templateKey !== '' ? $templateKey : null)
+            ?? (isset($job['template_key']) && is_string($job['template_key']) && $job['template_key'] !== ''
+                ? $job['template_key']
+                : null);
+        $designUuid = (is_string($designUuid) && $designUuid !== '' ? $designUuid : null)
+            ?? (isset($job['design_uuid']) && is_string($job['design_uuid']) && $job['design_uuid'] !== ''
+                ? $job['design_uuid']
+                : null);
+        $gradeLevelId = $gradeLevelId
+            ?? (isset($job['grade_level_id']) ? (int) $job['grade_level_id'] : null);
         if ($gradeLevelId === 0) {
             $gradeLevelId = null;
         }
@@ -197,7 +214,7 @@ class CredentialSheetService
         try {
             [$name, $design, $payload, $studentId, $photoPath] = $kind === CredentialHolderKind::Students
                 ? $this->studentCard($holderId, $templateKey)
-                : $this->personCard($kind, $holderId, $templateKey, $gradeLevelId);
+                : $this->personCard($kind, $holderId, $templateKey, $gradeLevelId, $designUuid);
 
             foreach ($omitFields as $key) {
                 $payload[$key] = '';
@@ -396,6 +413,7 @@ class CredentialSheetService
         int $id,
         ?string $templateKey = null,
         ?int $gradeLevelId = null,
+        ?string $designUuid = null,
     ): array {
         $base = [
             'id' => $id,
@@ -415,7 +433,11 @@ class CredentialSheetService
                 $design = $this->printJobs->resolveDesignForStudent($student, $templateKey);
                 $base['name'] = $student->profile->fullName();
             } else {
-                [$name, $design] = array_slice($this->personCard($kind, $id, $templateKey, $gradeLevelId), 0, 2);
+                [$name, $design] = array_slice(
+                    $this->personCard($kind, $id, $templateKey, $gradeLevelId, $designUuid),
+                    0,
+                    2
+                );
                 $base['name'] = $name;
             }
 
@@ -499,6 +521,7 @@ class CredentialSheetService
         int $id,
         ?string $templateKey = null,
         ?int $gradeLevelId = null,
+        ?string $designUuid = null,
     ): array {
         $model = $kind->personModel();
         $relations = $kind === CredentialHolderKind::Guardians ? GuardianCredentialData::RELATIONS : ['profile.address'];
@@ -513,9 +536,13 @@ class CredentialSheetService
                 ?? $this->personPhotos->resolvePath($photoKind, $holder->id, 'profile'))
             : null;
 
+        $design = $designUuid
+            ? app(CardTemplateService::class)->findDesign($designUuid)
+            : $this->printJobs->resolveDesignForPerson($kind, $templateKey, $gradeLevelId);
+
         return [
             $holder->profile->fullName(),
-            $this->printJobs->resolveDesignForPerson($kind, $templateKey, $gradeLevelId),
+            $design,
             $this->renderer->payloadFromPerson($kind, $holder),
             0,
             $photoPath,

@@ -111,7 +111,7 @@ class CredentialSheetController extends Controller
             'ids.*' => ['integer', 'distinct'],
             'omit_fields' => ['sometimes', 'array'],
             'omit_fields.*' => ['string', 'max:40'],
-            'template_key' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'template_key' => ['sometimes', 'nullable', 'string', 'max:100'],
             'grade_id' => ['sometimes', 'nullable', 'integer', 'exists:grade_levels,id'],
         ]);
     }

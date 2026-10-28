@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 /**
- * What a guardian credential shows: the guardian's minors with an active enrollment
- * and the other guardian authorized for them.
+ * Guardian credentials are issued only to primary tutors.
+ * The secondary tutor on the card is an explicit backup (is_secondary), never a card holder.
  */
 class GuardianCredentialData
 {
@@ -22,28 +22,34 @@ class GuardianCredentialData
     ];
 
     /**
-     * Guardians with at least one minor actively enrolled.
+     * Primary guardians with at least one minor actively enrolled (credential holders only).
      * Optional grade/group scope: tutor appears if any child is in that scope.
      */
     public function query(?int $gradeId = null, ?int $groupId = null): Builder
     {
         $q = Guardian::query()
             ->whereHas('profile')
-            ->with(self::RELATIONS);
+            ->whereHas(
+                'students',
+                function (Builder $studentQuery) use ($gradeId, $groupId) {
+                    $studentQuery->where('guardian_student.is_primary', true);
 
-        if ($groupId) {
-            $q->whereHas(
-                'students.currentEnrollment',
-                fn (Builder $eq) => $eq->where('class_group_id', $groupId)
-            );
-        } elseif ($gradeId) {
-            $q->whereHas(
-                'students.currentEnrollment.classGroup',
-                fn (Builder $cg) => $cg->where('grade_level_id', $gradeId)
-            );
-        } else {
-            $q->whereHas('students.currentEnrollment');
-        }
+                    if ($groupId) {
+                        $studentQuery->whereHas(
+                            'currentEnrollment',
+                            fn (Builder $eq) => $eq->where('class_group_id', $groupId)
+                        );
+                    } elseif ($gradeId) {
+                        $studentQuery->whereHas(
+                            'currentEnrollment.classGroup',
+                            fn (Builder $cg) => $cg->where('grade_level_id', $gradeId)
+                        );
+                    } else {
+                        $studentQuery->whereHas('currentEnrollment');
+                    }
+                }
+            )
+            ->with(self::RELATIONS);
 
         return $q;
     }
@@ -65,11 +71,23 @@ class GuardianCredentialData
     }
 
     /**
+     * Active minors where this guardian is the primary (credential owner).
+     *
+     * @return Collection<int, Student>
+     */
+    public function primaryActiveStudents(Guardian $guardian): Collection
+    {
+        return $this->activeStudents($guardian)
+            ->filter(fn (Student $s) => (bool) ($s->pivot?->is_primary ?? false))
+            ->values();
+    }
+
+    /**
      * @return array<int, array{student_id: int, grade_group: string, first_name: string, last_names: string}>
      */
     public function dependents(Guardian $guardian): array
     {
-        return $this->activeStudents($guardian)
+        return $this->primaryActiveStudents($guardian)
             ->map(fn (Student $s) => [
                 'student_id' => (int) $s->id,
                 'grade_group' => $this->gradeGroup($s),
@@ -81,29 +99,36 @@ class GuardianCredentialData
 
     public function kinship(Guardian $guardian): string
     {
-        $fromPivot = $this->activeStudents($guardian)
+        $fromPivot = $this->primaryActiveStudents($guardian)
             ->map(fn (Student $s) => trim((string) ($s->pivot?->relationship ?? '')))
             ->first(fn (string $value) => $value !== '');
 
-        return $fromPivot ?? trim((string) ($guardian->Kinship ?? ''));
+        return $fromPivot
+            ?? $this->activeStudents($guardian)
+                ->map(fn (Student $s) => trim((string) ($s->pivot?->relationship ?? '')))
+                ->first(fn (string $value) => $value !== '')
+            ?? trim((string) ($guardian->Kinship ?? ''));
     }
 
     /**
-     * The first other guardian of any of this guardian's active minors.
+     * Explicit credential secondary for a primary holder's minors (is_secondary on pivot).
      *
      * @return array{name: string, phone: string, kinship: string}|null
      */
     public function secondGuardian(Guardian $guardian): ?array
     {
-        foreach ($this->activeStudents($guardian) as $student) {
-            $other = $student->guardians->first(
-                fn (Guardian $g) => $g->id !== $guardian->id && $g->profile !== null
+        foreach ($this->primaryActiveStudents($guardian) as $student) {
+            $secondary = $student->guardians->first(
+                fn (Guardian $g) => (int) $g->id !== (int) $guardian->id
+                    && $g->profile !== null
+                    && (bool) ($g->pivot?->is_secondary ?? false)
             );
-            if ($other) {
+
+            if ($secondary) {
                 return [
-                    'name' => $other->profile->fullName(),
-                    'phone' => trim((string) ($other->profile->phone_number ?? '')),
-                    'kinship' => trim((string) ($other->pivot?->relationship ?: ($other->Kinship ?? ''))),
+                    'name' => $secondary->profile->fullName(),
+                    'phone' => trim((string) ($secondary->profile->phone_number ?? '')),
+                    'kinship' => trim((string) ($secondary->pivot?->relationship ?: ($secondary->Kinship ?? ''))),
                 ];
             }
         }

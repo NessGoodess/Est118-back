@@ -163,11 +163,12 @@ class PrintJobService
         if (is_string($preferredKey) && trim($preferredKey) !== '') {
             try {
                 $design = $this->templates->findDesign($preferredKey);
+                // Explicit ActionPanel / sheet selection must win over "latest by id" fallback.
                 if ($design->audience === $kind->value) {
                     return $design;
                 }
-            } catch (\Throwable) {
-                // Fall through to the audience default.
+            } catch (\Throwable $e) {
+                report($e);
             }
         }
 
@@ -773,7 +774,8 @@ class PrintJobService
         if (is_string($preferredKey) && trim($preferredKey) !== '') {
             try {
                 $design = $this->templates->findDesign($preferredKey);
-                if ($this->designAppliesToGrade($design, $gradeId)) {
+                // Explicit picker / sheet selection wins when the design is for students.
+                if ($design->audience === 'students') {
                     return $design;
                 }
             } catch (\Throwable) {
@@ -809,15 +811,6 @@ class PrintJobService
         throw ValidationException::withMessages([
             'template_key' => ["El alumno {$student->id} no tiene un diseño de credencial aplicado."],
         ]);
-    }
-
-    private function designAppliesToGrade(CardDesign $design, mixed $gradeId): bool
-    {
-        if (! $design->grade_level_id) {
-            return true;
-        }
-
-        return $gradeId !== null && (int) $design->grade_level_id === (int) $gradeId;
     }
 
     private function resolveSideMode(string $requested, string $facesMode): string

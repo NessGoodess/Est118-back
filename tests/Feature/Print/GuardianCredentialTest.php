@@ -40,29 +40,39 @@ class GuardianCredentialTest extends TestCase
         $this->year = AcademicYear::factory()->create(['is_active' => true, 'year_start' => '2026', 'year_end' => '2027']);
     }
 
-    public function test_only_guardians_with_an_active_enrollment_are_listed(): void
+    public function test_only_primary_guardians_with_an_active_enrollment_are_listed(): void
     {
         $mother = $this->guardian('PATRICIA', 'SANCHEZ', 'MORALES');
         $father = $this->guardian('MIGUEL', 'SANCHEZ', 'MORALES');
+        $aunt = $this->guardian('LAURA', 'SANCHEZ', null);
         $student = $this->student('SANTIAGO', 'SANCHEZ', '2°', 'F');
-        $student->guardians()->attach($mother->id, ['relationship' => 'Madre']);
-        $student->guardians()->attach($father->id, ['relationship' => 'Padre']);
+        $this->link($student, $mother, 'Madre', primary: true);
+        $this->link($student, $father, 'Padre', secondary: true);
+        $this->link($student, $aunt, 'Tía');
 
         $orphan = $this->guardian('LUIS', 'MORA', null);
-        $this->student('ANA', 'MORA', '1°', 'A', active: false)->guardians()->attach($orphan->id);
+        $this->link(
+            $this->student('ANA', 'MORA', '1°', 'A', active: false),
+            $orphan,
+            'Padre',
+            primary: true
+        );
 
         $response = $this->getJson('/api/credential-prints/people?kind=guardians')
             ->assertOk()
-            ->assertJsonCount(2, 'data');
+            ->assertJsonCount(1, 'data');
 
-        $this->assertNotContains($orphan->id, collect($response->json('data'))->pluck('id'));
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertContains($mother->id, $ids);
+        $this->assertNotContains($father->id, $ids);
+        $this->assertNotContains($aunt->id, $ids);
+        $this->assertNotContains($orphan->id, $ids);
 
         $response->assertJsonPath('data.0.kind', 'guardians')
             ->assertJsonPath('data.0.dependents.0.grade_group', '2° F')
             ->assertJsonPath('data.0.dependents.0.first_name', 'SANTIAGO');
 
-        $row = collect($this->getJson('/api/credential-prints/people?kind=guardians')->json('data'))
-            ->firstWhere('id', $mother->id);
+        $row = collect($response->json('data'))->firstWhere('id', $mother->id);
         $this->assertSame('Madre', $row['kinship']);
         $this->assertSame('T'.str_pad((string) $mother->id, 4, '0', STR_PAD_LEFT), $row['folio']);
         $this->assertSame(
@@ -74,8 +84,8 @@ class GuardianCredentialTest extends TestCase
     public function test_guardian_payload_lists_every_active_minor(): void
     {
         $mother = $this->guardian('CARLOS', 'MARTINEZ', 'LOPEZ');
-        $this->student('CAMILA', 'MARTINEZ', '1°', 'B')->guardians()->attach($mother->id, ['relationship' => 'Padre']);
-        $this->student('MATEO', 'MARTINEZ', '3°', 'E')->guardians()->attach($mother->id, ['relationship' => 'Padre']);
+        $this->link($this->student('CAMILA', 'MARTINEZ', '1°', 'B'), $mother, 'Padre', primary: true);
+        $this->link($this->student('MATEO', 'MARTINEZ', '3°', 'E'), $mother, 'Padre', primary: true);
 
         $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
 
@@ -87,14 +97,16 @@ class GuardianCredentialTest extends TestCase
         $this->assertSame('guardians', $payload['holder_kind']);
     }
 
-    public function test_second_guardian_card_field_is_name_phone_kinship_lines(): void
+    public function test_second_guardian_uses_explicit_is_secondary(): void
     {
         $mother = $this->guardian('PATRICIA', 'SANCHEZ', 'MORALES');
         $father = $this->guardian('MIGUEL', 'SANCHEZ', 'MORALES');
+        $aunt = $this->guardian('LAURA', 'SANCHEZ', null);
         $father->profile->update(['phone_number' => '722 555 1212']);
         $student = $this->student('SANTIAGO', 'SANCHEZ', '2°', 'F');
-        $student->guardians()->attach($mother->id, ['relationship' => 'Madre']);
-        $student->guardians()->attach($father->id, ['relationship' => 'Padre']);
+        $this->link($student, $mother, 'Madre', primary: true);
+        $this->link($student, $aunt, 'Tía');
+        $this->link($student, $father, 'Padre', secondary: true);
 
         $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
 
@@ -105,7 +117,7 @@ class GuardianCredentialTest extends TestCase
     {
         $design = $this->design('guardians', 'double');
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
-        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id, ['relationship' => 'Madre']);
+        $this->link($this->student('DIEGO', 'HERNANDEZ', '1°', 'A'), $guardian, 'Madre', primary: true);
 
         $this->postJson('/api/credential-prints/people', ['kind' => 'guardians', 'ids' => [$guardian->id]])
             ->assertStatus(202)
@@ -124,9 +136,9 @@ class GuardianCredentialTest extends TestCase
         $camila = $this->student('CAMILA', 'SANCHEZ', '1°', 'B');
         $mateo = $this->student('MATEO', 'SANCHEZ', '3°', 'E');
         $diego = $this->student('DIEGO', 'PRIMERO', '1°', 'B');
-        $camila->guardians()->attach($mother->id, ['relationship' => 'Madre']);
-        $mateo->guardians()->attach($mother->id, ['relationship' => 'Madre']);
-        $diego->guardians()->attach($onlyFirst->id, ['relationship' => 'Madre']);
+        $this->link($camila, $mother, 'Madre', primary: true);
+        $this->link($mateo, $mother, 'Madre', primary: true);
+        $this->link($diego, $onlyFirst, 'Madre', primary: true);
 
         $grade1 = GradeLevel::query()->where('name', '1°')->value('id');
         $grade3 = GradeLevel::query()->where('name', '3°')->value('id');
@@ -163,7 +175,7 @@ class GuardianCredentialTest extends TestCase
         $design3 = $this->design('guardians', 'double', $grade3->id, 'Gafete tutores 3');
 
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
-        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+        $this->link($this->student('DIEGO', 'HERNANDEZ', '1°', 'A'), $guardian, 'Madre', primary: true);
 
         $this->postJson('/api/credential-prints/people', [
             'kind' => 'guardians',
@@ -197,7 +209,7 @@ class GuardianCredentialTest extends TestCase
         $grade1 = GradeLevel::query()->firstOrCreate(['name' => '1°']);
         $design = $this->design('guardians', 'single', $grade1->id);
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
-        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+        $this->link($this->student('DIEGO', 'HERNANDEZ', '1°', 'A'), $guardian, 'Madre', primary: true);
 
         $this->get('/api/print-jobs/preview?'.http_build_query([
             'kind' => 'guardians',
@@ -223,16 +235,25 @@ class GuardianCredentialTest extends TestCase
         $this->design('guardians', 'double', $grade3->id, 'Tutores 3°');
 
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
-        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+        $this->link($this->student('DIEGO', 'HERNANDEZ', '1°', 'A'), $guardian, 'Madre', primary: true);
 
         $started = $this->postJson('/api/credential-sheets/jobs', [
             'kind' => 'guardians',
             'ids' => [$guardian->id],
             'template_key' => $design1->uuid,
             'grade_id' => $grade1->id,
-        ])->assertAccepted()->json('data.uuid');
+        ])->assertAccepted()
+            ->assertJsonPath('data.cards.0.design_label', 'Tutores 1°')
+            ->json('data.uuid');
 
-        app(\App\Services\Print\CredentialSheetService::class)->renderCard($started, (int) $guardian->id);
+        // Simulate the queued worker with the locked design args from the job payload.
+        app(\App\Services\Print\CredentialSheetService::class)->renderCard(
+            $started,
+            (int) $guardian->id,
+            $design1->uuid,
+            $grade1->id,
+            $design1->uuid,
+        );
 
         $this->getJson('/api/credential-sheets/jobs/'.$started)
             ->assertOk()
@@ -251,7 +272,7 @@ class GuardianCredentialTest extends TestCase
 
         $this->design('guardians', 'double');
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
-        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+        $this->link($this->student('DIEGO', 'HERNANDEZ', '1°', 'A'), $guardian, 'Madre', primary: true);
 
         $started = $this->postJson('/api/credential-sheets/jobs', [
             'kind' => 'guardians',
@@ -297,7 +318,7 @@ class GuardianCredentialTest extends TestCase
 
         $this->design('guardians', 'double');
         $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
-        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+        $this->link($this->student('DIEGO', 'HERNANDEZ', '1°', 'A'), $guardian, 'Madre', primary: true);
 
         $uuid = $this->postJson('/api/credential-sheets/jobs', [
             'kind' => 'guardians',
@@ -344,6 +365,21 @@ class GuardianCredentialTest extends TestCase
 
         $this->assertSame('Coordinadora', $payload['role']);
         $this->assertSame('Académico', $payload['department']);
+    }
+
+    private function link(
+        Student $student,
+        Guardian $guardian,
+        string $relationship,
+        bool $primary = false,
+        bool $secondary = false,
+    ): void {
+        $student->guardians()->attach($guardian->id, [
+            'relationship' => $relationship,
+            'is_primary' => $primary,
+            'is_secondary' => $secondary && ! $primary,
+            'sort_order' => $primary ? 0 : ($secondary ? 1 : 2),
+        ]);
     }
 
     private function guardian(string $first, string $last, ?string $second): Guardian

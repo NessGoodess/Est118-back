@@ -171,6 +171,7 @@ class StudentDetailResource extends JsonResource
             'national_id' => $profile?->national_id,
             'relationship' => $guardian->pivot->relationship,
             'is_primary' => (bool) ($guardian->pivot->is_primary ?? false),
+            'is_secondary' => (bool) ($guardian->pivot->is_secondary ?? false),
             'sort_order' => (int) ($guardian->pivot->sort_order ?? 0),
             'email' => $profile?->email,
             'phone' => $profile?->phone_number,

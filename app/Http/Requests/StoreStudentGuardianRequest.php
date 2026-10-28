@@ -50,6 +50,7 @@ class StoreStudentGuardianRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'relationship' => ['nullable', 'string', 'min:2', 'max:50'],
             'is_primary' => ['sometimes', 'boolean'],
+            'is_secondary' => ['sometimes', 'boolean'],
             'address_mode' => ['required', Rule::in(['student', 'new'])],
             ...$this->addressRules('address', $needsAddress),
         ];

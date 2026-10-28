@@ -55,9 +55,10 @@ class Student extends Model
     public function guardians(): BelongsToMany
     {
         return $this->belongsToMany(Guardian::class, 'guardian_student')
-            ->withPivot(['relationship', 'is_primary', 'sort_order'])
+            ->withPivot(['relationship', 'is_primary', 'is_secondary', 'sort_order'])
             ->withTimestamps()
             ->orderByPivot('is_primary', 'desc')
+            ->orderByPivot('is_secondary', 'desc')
             ->orderByPivot('sort_order')
             ->orderBy('guardians.id');
     }
@@ -65,15 +66,19 @@ class Student extends Model
     /**
      * Pivot attrs for linking a guardian the student does not already have.
      *
-     * @return array{relationship: ?string, is_primary: bool, sort_order: int}
+     * @return array{relationship: ?string, is_primary: bool, is_secondary: bool, sort_order: int}
      */
     public function guardianAttachPivot(?string $relationship = null): array
     {
         $hasAny = $this->guardians()->exists();
+        $hasSecondary = $hasAny
+            && $this->guardians()->wherePivot('is_secondary', true)->exists();
 
         return [
             'relationship' => $relationship === '' ? null : $relationship,
             'is_primary' => ! $hasAny,
+            // Second linked tutor becomes the credential secondary until the user picks another.
+            'is_secondary' => $hasAny && ! $hasSecondary,
             'sort_order' => $hasAny
                 ? (int) $this->guardians()->max('guardian_student.sort_order') + 1
                 : 0,

@@ -252,8 +252,9 @@ class CardTemplateService
     {
         $key = trim($key);
         $design = CardDesign::query()
-            ->where('uuid', $key)
-            ->orWhere('legacy_key', $key)
+            ->where(function ($q) use ($key) {
+                $q->where('uuid', $key)->orWhere('legacy_key', $key);
+            })
             ->first();
 
         if (! $design) {

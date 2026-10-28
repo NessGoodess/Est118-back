@@ -141,12 +141,28 @@ class StudentsService
                 ? ['relationship' => $relationship]
                 : $student->guardianAttachPivot($relationship);
 
-            if (array_key_exists('is_primary', $data) && (bool) $data['is_primary']) {
+            $wantPrimary = array_key_exists('is_primary', $data) && (bool) $data['is_primary'];
+            $wantSecondary = array_key_exists('is_secondary', $data) && (bool) $data['is_secondary'];
+            if ($wantPrimary) {
+                $wantSecondary = false;
+            }
+
+            if ($wantPrimary) {
                 DB::table('guardian_student')
                     ->where('student_id', $student->id)
                     ->where('guardian_id', '!=', $guardian->id)
                     ->update(['is_primary' => false]);
                 $pivot['is_primary'] = true;
+                $pivot['is_secondary'] = false;
+            } elseif ($wantSecondary) {
+                DB::table('guardian_student')
+                    ->where('student_id', $student->id)
+                    ->where('guardian_id', '!=', $guardian->id)
+                    ->update(['is_secondary' => false]);
+                $pivot['is_primary'] = false;
+                $pivot['is_secondary'] = true;
+            } elseif (array_key_exists('is_secondary', $data)) {
+                $pivot['is_secondary'] = false;
             }
 
             $student->guardians()->syncWithoutDetaching([

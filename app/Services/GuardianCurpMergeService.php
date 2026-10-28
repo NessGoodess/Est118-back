@@ -81,13 +81,39 @@ class GuardianCurpMergeService
         if (array_key_exists('sort_order', $data)) {
             $pivot['sort_order'] = (int) $data['sort_order'];
         }
-        if (array_key_exists('is_primary', $data)) {
-            $pivot['is_primary'] = (bool) $data['is_primary'];
-            if ($pivot['is_primary']) {
+        if (array_key_exists('is_primary', $data) || array_key_exists('is_secondary', $data)) {
+            $isPrimary = array_key_exists('is_primary', $data)
+                ? (bool) $data['is_primary']
+                : (bool) ($student->guardians()->whereKey($guardian->id)->first()?->pivot?->is_primary ?? false);
+            $isSecondary = array_key_exists('is_secondary', $data)
+                ? (bool) $data['is_secondary']
+                : (bool) ($student->guardians()->whereKey($guardian->id)->first()?->pivot?->is_secondary ?? false);
+
+            // Primary wins if both are requested; roles are mutually exclusive.
+            if ($isPrimary) {
+                $isSecondary = false;
+            }
+
+            $pivot['is_primary'] = $isPrimary;
+            $pivot['is_secondary'] = $isSecondary;
+
+            if ($isPrimary) {
                 DB::table('guardian_student')
                     ->where('student_id', $student->id)
                     ->where('guardian_id', '!=', $guardian->id)
                     ->update(['is_primary' => false]);
+                DB::table('guardian_student')
+                    ->where('student_id', $student->id)
+                    ->where('guardian_id', $guardian->id)
+                    ->update(['is_secondary' => false]);
+            }
+
+            if ($isSecondary) {
+                DB::table('guardian_student')
+                    ->where('student_id', $student->id)
+                    ->where('guardian_id', '!=', $guardian->id)
+                    ->update(['is_secondary' => false]);
+                $pivot['is_primary'] = false;
             }
         }
         $student->guardians()->updateExistingPivot($guardian->id, $pivot);

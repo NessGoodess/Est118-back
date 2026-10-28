@@ -33,7 +33,9 @@ class CredentialSheetController extends Controller
             $kind,
             $data['ids'],
             $data['omit_fields'] ?? [],
-            (int) $request->user()->id
+            (int) $request->user()->id,
+            isset($data['template_key']) ? (string) $data['template_key'] : null,
+            isset($data['grade_id']) ? (int) $data['grade_id'] : null,
         );
 
         return response()->json([
@@ -88,12 +90,18 @@ class CredentialSheetController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $this->sheets->render($kind, $data['ids'], $data['omit_fields'] ?? []),
+            'data' => $this->sheets->render(
+                $kind,
+                $data['ids'],
+                $data['omit_fields'] ?? [],
+                isset($data['template_key']) ? (string) $data['template_key'] : null,
+                isset($data['grade_id']) ? (int) $data['grade_id'] : null,
+            ),
         ]);
     }
 
     /**
-     * @return array{kind: string, ids: array<int, int>, omit_fields?: array<int, string>}
+     * @return array{kind: string, ids: array<int, int>, omit_fields?: array<int, string>, template_key?: string|null, grade_id?: int|null}
      */
     private function validatedSheetRequest(Request $request): array
     {
@@ -103,6 +111,8 @@ class CredentialSheetController extends Controller
             'ids.*' => ['integer', 'distinct'],
             'omit_fields' => ['sometimes', 'array'],
             'omit_fields.*' => ['string', 'max:40'],
+            'template_key' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'grade_id' => ['sometimes', 'nullable', 'integer', 'exists:grade_levels,id'],
         ]);
     }
 

@@ -208,6 +208,38 @@ class GuardianCredentialTest extends TestCase
             ->assertHeader('Content-Type', 'image/png');
     }
 
+    public function test_sheet_job_uses_selected_template_not_latest_grade_design(): void
+    {
+        if (! function_exists('imagecreatetruecolor')) {
+            $this->markTestSkipped('GD is required to render cards.');
+        }
+        Storage::fake('private');
+        Storage::fake('public');
+        \Illuminate\Support\Facades\Event::fake([\App\Events\CredentialSheetCardUpdated::class]);
+
+        $grade1 = GradeLevel::query()->firstOrCreate(['name' => '1°']);
+        $grade3 = GradeLevel::query()->firstOrCreate(['name' => '3°']);
+        $design1 = $this->design('guardians', 'double', $grade1->id, 'Tutores 1°');
+        $this->design('guardians', 'double', $grade3->id, 'Tutores 3°');
+
+        $guardian = $this->guardian('ELENA', 'HERNANDEZ', null);
+        $this->student('DIEGO', 'HERNANDEZ', '1°', 'A')->guardians()->attach($guardian->id);
+
+        $started = $this->postJson('/api/credential-sheets/jobs', [
+            'kind' => 'guardians',
+            'ids' => [$guardian->id],
+            'template_key' => $design1->uuid,
+            'grade_id' => $grade1->id,
+        ])->assertAccepted()->json('data.uuid');
+
+        app(\App\Services\Print\CredentialSheetService::class)->renderCard($started, (int) $guardian->id);
+
+        $this->getJson('/api/credential-sheets/jobs/'.$started)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'ready')
+            ->assertJsonPath('data.cards.0.design_label', 'Tutores 1°');
+    }
+
     public function test_sheet_job_renders_async_and_records_nothing(): void
     {
         if (! function_exists('imagecreatetruecolor')) {

@@ -41,8 +41,14 @@ class CredentialSheetService
      * @param  array<int, string>  $omitFields
      * @return array{uuid: string, summary: array{total: int, ready: int, failed: int, rendering: int}}
      */
-    public function start(CredentialHolderKind $kind, array $ids, array $omitFields, int $userId): array
-    {
+    public function start(
+        CredentialHolderKind $kind,
+        array $ids,
+        array $omitFields,
+        int $userId,
+        ?string $templateKey = null,
+        ?int $gradeLevelId = null,
+    ): array {
         $ids = array_values(array_unique(array_map('intval', $ids)));
         if ($ids === []) {
             throw ValidationException::withMessages(['ids' => ['Selecciona al menos una credencial.']]);
@@ -54,12 +60,13 @@ class CredentialSheetService
         }
 
         $omitFields = array_values(array_unique(array_map('strval', $omitFields)));
+        $templateKey = is_string($templateKey) && trim($templateKey) !== '' ? trim($templateKey) : null;
         $uuid = (string) Str::uuid();
         $now = now();
         $cards = [];
         // Resolve name/orientation/faces up front so the UI skeleton matches the real card size.
         foreach ($ids as $id) {
-            $cards[(string) $id] = $this->pendingMeta($kind, $id);
+            $cards[(string) $id] = $this->pendingMeta($kind, $id, $templateKey, $gradeLevelId);
         }
 
         $payload = [
@@ -67,6 +74,8 @@ class CredentialSheetService
             'user_id' => $userId,
             'kind' => $kind->value,
             'omit_fields' => $omitFields,
+            'template_key' => $templateKey,
+            'grade_level_id' => $gradeLevelId,
             'ids' => $ids,
             'status' => 'processing',
             'created_at' => $now->toIso8601String(),
@@ -177,11 +186,18 @@ class CredentialSheetService
 
         $kind = CredentialHolderKind::from((string) $job['kind']);
         $omitFields = $job['omit_fields'] ?? [];
+        $templateKey = isset($job['template_key']) && is_string($job['template_key']) && $job['template_key'] !== ''
+            ? $job['template_key']
+            : null;
+        $gradeLevelId = isset($job['grade_level_id']) ? (int) $job['grade_level_id'] : null;
+        if ($gradeLevelId === 0) {
+            $gradeLevelId = null;
+        }
 
         try {
             [$name, $design, $payload, $studentId, $photoPath] = $kind === CredentialHolderKind::Students
-                ? $this->studentCard($holderId)
-                : $this->personCard($kind, $holderId);
+                ? $this->studentCard($holderId, $templateKey)
+                : $this->personCard($kind, $holderId, $templateKey, $gradeLevelId);
 
             foreach ($omitFields as $key) {
                 $payload[$key] = '';
@@ -270,18 +286,24 @@ class CredentialSheetService
      * @param  array<int, string>  $omitFields
      * @return array<int, array{id: int, name: string, design_label: string, orientation: string, front: string, back: ?string}>
      */
-    public function render(CredentialHolderKind $kind, array $ids, array $omitFields = []): array
-    {
+    public function render(
+        CredentialHolderKind $kind,
+        array $ids,
+        array $omitFields = [],
+        ?string $templateKey = null,
+        ?int $gradeLevelId = null,
+    ): array {
         $ids = array_values(array_unique(array_map('intval', $ids)));
         if ($ids === []) {
             throw ValidationException::withMessages(['ids' => ['Selecciona al menos una credencial.']]);
         }
 
+        $templateKey = is_string($templateKey) && trim($templateKey) !== '' ? trim($templateKey) : null;
         $rows = [];
         foreach ($ids as $id) {
             [$name, $design, $payload, $studentId, $photoPath] = $kind === CredentialHolderKind::Students
-                ? $this->studentCard($id)
-                : $this->personCard($kind, $id);
+                ? $this->studentCard($id, $templateKey)
+                : $this->personCard($kind, $id, $templateKey, $gradeLevelId);
 
             foreach ($omitFields as $key) {
                 $payload[$key] = '';
@@ -369,8 +391,12 @@ class CredentialSheetService
      *
      * @return array<string, mixed>
      */
-    private function pendingMeta(CredentialHolderKind $kind, int $id): array
-    {
+    private function pendingMeta(
+        CredentialHolderKind $kind,
+        int $id,
+        ?string $templateKey = null,
+        ?int $gradeLevelId = null,
+    ): array {
         $base = [
             'id' => $id,
             'status' => 'pending',
@@ -386,10 +412,10 @@ class CredentialSheetService
         try {
             if ($kind === CredentialHolderKind::Students) {
                 $student = $this->printJobs->studentForPrint($id);
-                $design = $this->printJobs->resolveDesignForStudent($student);
+                $design = $this->printJobs->resolveDesignForStudent($student, $templateKey);
                 $base['name'] = $student->profile->fullName();
             } else {
-                [$name, $design] = array_slice($this->personCard($kind, $id), 0, 2);
+                [$name, $design] = array_slice($this->personCard($kind, $id, $templateKey, $gradeLevelId), 0, 2);
                 $base['name'] = $name;
             }
 
@@ -448,10 +474,13 @@ class CredentialSheetService
     /**
      * @return array{0: string, 1: CardDesign, 2: array<string, mixed>, 3: int, 4: ?string}
      */
-    private function studentCard(int $studentId): array
+    /**
+     * @return array{0: string, 1: CardDesign, 2: array<string, mixed>, 3: int, 4: ?string}
+     */
+    private function studentCard(int $studentId, ?string $templateKey = null): array
     {
         $student = $this->printJobs->studentForPrint($studentId);
-        $design = $this->printJobs->resolveDesignForStudent($student);
+        $design = $this->printJobs->resolveDesignForStudent($student, $templateKey);
 
         return [
             $student->profile->fullName(),
@@ -465,8 +494,12 @@ class CredentialSheetService
     /**
      * @return array{0: string, 1: CardDesign, 2: array<string, mixed>, 3: int, 4: ?string}
      */
-    private function personCard(CredentialHolderKind $kind, int $id): array
-    {
+    private function personCard(
+        CredentialHolderKind $kind,
+        int $id,
+        ?string $templateKey = null,
+        ?int $gradeLevelId = null,
+    ): array {
         $model = $kind->personModel();
         $relations = $kind === CredentialHolderKind::Guardians ? GuardianCredentialData::RELATIONS : ['profile.address'];
         $holder = $model::query()->with($relations)->find($id);
@@ -482,7 +515,7 @@ class CredentialSheetService
 
         return [
             $holder->profile->fullName(),
-            $this->printJobs->resolveDesignForPerson($kind),
+            $this->printJobs->resolveDesignForPerson($kind, $templateKey, $gradeLevelId),
             $this->renderer->payloadFromPerson($kind, $holder),
             0,
             $photoPath,

@@ -2,11 +2,15 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\People\PersonRules;
 use App\Support\Curp;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateStudentGuardianRequest extends FormRequest
 {
+    use PersonRules;
+
     public function authorize(): bool
     {
         return true;
@@ -38,6 +42,8 @@ class UpdateStudentGuardianRequest extends FormRequest
      */
     public function rules(): array
     {
+        $needsAddress = $this->input('address_mode') === 'new';
+
         // CURP uniqueness is resolved in GuardianCurpMergeService (409 merge conflict vs hard error).
         return [
             'first_name' => ['required', 'string', 'max:100'],
@@ -55,6 +61,8 @@ class UpdateStudentGuardianRequest extends FormRequest
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:30'],
+            'address_mode' => ['sometimes', 'nullable', Rule::in(['student', 'new'])],
+            ...$this->addressRules('address', $needsAddress),
         ];
     }
 
@@ -66,6 +74,7 @@ class UpdateStudentGuardianRequest extends FormRequest
         return [
             'national_id.regex' => 'La CURP del tutor no es válida.',
             'national_id.size' => 'La CURP del tutor debe tener 18 caracteres.',
+            'address_mode.in' => 'Selecciona un domicilio válido.',
         ];
     }
 }

@@ -9,6 +9,7 @@ use App\Http\Controllers\Print\Concerns\LogsPrintActions;
 use App\Models\AcademicYear;
 use App\Models\Guardian;
 use App\Models\Teacher;
+use App\Services\CredentialPrintingService;
 use App\Services\People\GuardianCredentialData;
 use App\Services\People\PersonPhotoPathService;
 use App\Services\Print\CredentialPrintService;
@@ -32,7 +33,8 @@ class PersonCredentialPrintController extends Controller
         private readonly CredentialPrintController $cardSerializer,
         private readonly PersonPhotoPathService $photos,
         private readonly StudentPhotoPathService $studentPhotos,
-        private readonly GuardianCredentialData $guardians
+        private readonly GuardianCredentialData $guardians,
+        private readonly CredentialPrintingService $credentials
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -65,7 +67,7 @@ class PersonCredentialPrintController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $holders->map(function ($holder) use ($kind, $latest, $photoKind, $year) {
+            'data' => $holders->map(function ($holder) use ($kind, $latest, $photoKind, $year, $gradeId, $groupId) {
                 $photoAt = $photoKind ? $this->photos->lastModifiedAt($photoKind, $holder->id) : null;
                 $hasPhoto = $photoKind !== null && $this->photos->fileExists($photoKind, $holder->id, 'profile');
                 $row = [
@@ -90,10 +92,14 @@ class PersonCredentialPrintController extends Controller
                 ];
 
                 if ($holder instanceof Guardian) {
+                    $dependents = $this->guardians->dependents($holder, $gradeId, $groupId);
                     $row += [
                         'folio' => $this->guardians->folio($holder),
                         'kinship' => $this->guardians->kinship($holder),
-                        'dependents' => $this->guardians->dependents($holder),
+                        'dependents' => $dependents,
+                        'dependent_last_names' => $dependents[0]['last_names'] ?? '',
+                        'address' => $this->credentials->formatAddress($holder->profile->address),
+                        'phone' => (string) ($holder->profile->phone_number ?? ''),
                         'second_guardian' => $this->guardians->secondGuardian($holder),
                     ];
                 }

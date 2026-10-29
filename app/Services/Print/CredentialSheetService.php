@@ -524,7 +524,9 @@ class CredentialSheetService
         ?string $designUuid = null,
     ): array {
         $model = $kind->personModel();
-        $relations = $kind === CredentialHolderKind::Guardians ? GuardianCredentialData::RELATIONS : ['profile.address'];
+        $relations = $kind === CredentialHolderKind::Guardians
+            ? GuardianCredentialData::relations()
+            : ['profile.address'];
         $holder = $model::query()->with($relations)->find($id);
         if (! $holder?->profile) {
             throw ValidationException::withMessages(['ids' => ["{$kind->label()} {$id} no encontrado o sin perfil."]]);
@@ -543,7 +545,7 @@ class CredentialSheetService
         return [
             $holder->profile->fullName(),
             $design,
-            $this->renderer->payloadFromPerson($kind, $holder),
+            $this->renderer->payloadFromPerson($kind, $holder, $gradeLevelId),
             0,
             $photoPath,
         ];

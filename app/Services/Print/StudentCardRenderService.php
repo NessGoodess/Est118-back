@@ -104,12 +104,12 @@ class StudentCardRenderService
         }
 
         $relations = $kind === CredentialHolderKind::Guardians
-            ? GuardianCredentialData::RELATIONS
+            ? GuardianCredentialData::relations()
             : ['profile.address', 'profile.emergencyContacts'];
 
         $holder = $model::query()->with($relations)->findOrFail($holderId);
         $design = app(PrintJobService::class)->resolveDesignForPerson($kind, $templateKey, $gradeLevelId);
-        $payload = $this->payloadFromPerson($kind, $holder);
+        $payload = $this->payloadFromPerson($kind, $holder, $gradeLevelId);
         $photoKind = $kind->photoKind();
         $photoPath = $photoKind
             ? ($this->personPhotos->resolvePath($photoKind, $holderId, 'original')
@@ -172,10 +172,14 @@ class StudentCardRenderService
     /**
      * @return array<string, mixed>
      */
-    public function payloadFromPerson(CredentialHolderKind $kind, Teacher|Staff|Guardian $holder): array
-    {
+    public function payloadFromPerson(
+        CredentialHolderKind $kind,
+        Teacher|Staff|Guardian $holder,
+        ?int $gradeLevelId = null,
+        ?int $groupId = null
+    ): array {
         if ($holder instanceof Guardian) {
-            return $this->payloadFromGuardian($holder);
+            return $this->payloadFromGuardian($holder, $gradeLevelId, $groupId);
         }
 
         $profile = $holder->profile;
@@ -210,9 +214,12 @@ class StudentCardRenderService
     /**
      * @return array<string, mixed>
      */
-    public function payloadFromGuardian(Guardian $guardian): array
-    {
-        $guardian->loadMissing(GuardianCredentialData::RELATIONS);
+    public function payloadFromGuardian(
+        Guardian $guardian,
+        ?int $gradeLevelId = null,
+        ?int $groupId = null
+    ): array {
+        $guardian->loadMissing(GuardianCredentialData::relations());
         $profile = $guardian->profile;
 
         return [
@@ -232,7 +239,7 @@ class StudentCardRenderService
             'school' => 'EST 118',
             'role' => CredentialHolderKind::Guardians->label(),
             'department' => '',
-            ...$this->guardians->cardFields($guardian),
+            ...$this->guardians->cardFields($guardian, $gradeLevelId, $groupId),
         ];
     }
 

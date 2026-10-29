@@ -5,6 +5,7 @@ namespace Tests\Feature\Print;
 use App\Enums\CredentialHolderKind;
 use App\Enums\EnrollmentStatus;
 use App\Models\AcademicYear;
+use App\Models\Address;
 use App\Models\CardDesign;
 use App\Models\ClassGroup;
 use App\Models\CredentialPrint;
@@ -93,7 +94,7 @@ class GuardianCredentialTest extends TestCase
         $this->assertSame('Padre', $payload['kinship']);
         $this->assertSame("1° B · MARTINEZ, CAMILA\n3° E · MARTINEZ, MATEO", $payload['dependents']);
         $this->assertSame('1° B · MARTINEZ, CAMILA', $payload['dependent']);
-        $this->assertSame('No registrado', $payload['second_guardian']);
+        $this->assertSame('', $payload['second_guardian']);
         $this->assertSame('guardians', $payload['holder_kind']);
     }
 
@@ -129,6 +130,42 @@ class GuardianCredentialTest extends TestCase
         $this->assertSame('1° A · HERNANDEZ, DIEGO', $job->payload_json['dependent']);
     }
 
+    public function test_guardians_index_excludes_prior_cycle_active_enrollments(): void
+    {
+        $priorYear = AcademicYear::factory()->create([
+            'is_active' => false,
+            'year_start' => '2025',
+            'year_end' => '2026',
+        ]);
+
+        $stuckGuardian = $this->guardian('STUCK', 'PRIOR', null);
+        $currentGuardian = $this->guardian('OK', 'CURRENT', null);
+
+        $stuck = $this->studentInYear('OLD', 'KID', '1°', 'A', $priorYear);
+        $current = $this->student('NEW', 'KID', '1°', 'A');
+        $this->link($stuck, $stuckGuardian, 'Madre', primary: true);
+        $this->link($current, $currentGuardian, 'Madre', primary: true);
+
+        $grade1 = GradeLevel::query()->where('name', '1°')->value('id');
+        $groupCurrent = ClassGroup::query()
+            ->where('academic_year_id', $this->year->id)
+            ->where('grade_level_id', $grade1)
+            ->where('name', 'A')
+            ->value('id');
+
+        $response = $this->getJson(
+            '/api/credential-prints/people?kind=guardians&grade_id='.$grade1.'&group_id='.$groupCurrent
+        )->assertOk();
+
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertContains($currentGuardian->id, $ids);
+        $this->assertNotContains($stuckGuardian->id, $ids);
+
+        $payload = app(StudentCardRenderService::class)->payloadFromGuardian($stuckGuardian->fresh());
+        $this->assertSame('', $payload['dependents']);
+        $this->assertSame('', $payload['dependent']);
+    }
+
     public function test_guardians_index_filters_by_grade_and_group(): void
     {
         $mother = $this->guardian('PATRICIA', 'SANCHEZ', 'MORALES');
@@ -160,10 +197,94 @@ class GuardianCredentialTest extends TestCase
             ->assertOk()
             ->assertJsonCount(2, 'data');
 
-        // Multi-grade tutor still lists every dependent on the card row.
+        // Multi-grade tutor still lists every dependent; scoped child is first.
         $row = collect($this->getJson('/api/credential-prints/people?kind=guardians&grade_id='.$grade3)->json('data'))
             ->firstWhere('id', $mother->id);
         $this->assertCount(2, $row['dependents']);
+        $this->assertSame('MATEO', $row['dependents'][0]['first_name']);
+        $this->assertSame('3° E', $row['dependents'][0]['grade_group']);
+        $this->assertSame('SANCHEZ', $row['dependent_last_names']);
+        $this->assertSame('CAMILA', $row['dependents'][1]['first_name']);
+    }
+
+    public function test_dependents_prioritize_group_then_grade_scope(): void
+    {
+        $mother = $this->guardian('PATRICIA', 'SANCHEZ', 'MORALES');
+        $this->link($this->student('ANA', 'SANCHEZ', '1°', 'A'), $mother, 'Madre', primary: true);
+        $this->link($this->student('HECTOR', 'SANCHEZ', '1°', 'H'), $mother, 'Madre', primary: true);
+        $this->link($this->student('GINA', 'SANCHEZ', '3°', 'G'), $mother, 'Madre', primary: true);
+
+        $grade1 = GradeLevel::query()->where('name', '1°')->value('id');
+        $group1H = ClassGroup::query()
+            ->where('grade_level_id', $grade1)
+            ->where('name', 'H')
+            ->value('id');
+        $grade3 = GradeLevel::query()->where('name', '3°')->value('id');
+        $group3G = ClassGroup::query()
+            ->where('grade_level_id', $grade3)
+            ->where('name', 'G')
+            ->value('id');
+
+        $rowH = collect($this->getJson(
+            '/api/credential-prints/people?kind=guardians&grade_id='.$grade1.'&group_id='.$group1H
+        )->json('data'))->firstWhere('id', $mother->id);
+        $this->assertSame(['HECTOR', 'ANA', 'GINA'], array_column($rowH['dependents'], 'first_name'));
+        $this->assertSame('SANCHEZ', $rowH['dependent_last_names']);
+
+        $payload = app(StudentCardRenderService::class)->payloadFromGuardian(
+            $mother->fresh(),
+            $grade3,
+            $group3G
+        );
+        $this->assertSame('3° G · SANCHEZ, GINA', $payload['dependent']);
+        $this->assertStringStartsWith('3° G · SANCHEZ, GINA', $payload['dependents']);
+    }
+
+    public function test_guardian_payload_uses_tutor_address_and_phone_not_student(): void
+    {
+        $guardianAddress = Address::query()->create([
+            'street_type' => 'Calle',
+            'street_name' => 'Tutor',
+            'house_number' => '10',
+            'neighborhood_type' => 'Col.',
+            'neighborhood_name' => 'Centro',
+            'postal_code' => '50000',
+            'city' => 'Toluca',
+            'state' => 'México',
+        ]);
+        $studentAddress = Address::query()->create([
+            'street_type' => 'Av.',
+            'street_name' => 'Alumno',
+            'house_number' => '99',
+            'neighborhood_type' => 'Col.',
+            'neighborhood_name' => 'Norte',
+            'postal_code' => '50100',
+            'city' => 'Toluca',
+            'state' => 'México',
+        ]);
+
+        $mother = $this->guardian('ELENA', 'HERNANDEZ', null);
+        $mother->profile->update([
+            'phone_number' => '722 111 0000',
+            'address_id' => $guardianAddress->id,
+        ]);
+        $student = $this->student('DIEGO', 'HERNANDEZ', '1°', 'A');
+        $student->profile->update([
+            'phone_number' => '722 999 8888',
+            'address_id' => $studentAddress->id,
+        ]);
+        $this->link($student, $mother, 'Madre', primary: true);
+
+        $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
+
+        $this->assertStringContainsString('Tutor', $payload['address']);
+        $this->assertStringNotContainsString('Alumno', $payload['address']);
+        $this->assertSame('722 111 0000', $payload['student_phone']);
+
+        $row = collect($this->getJson('/api/credential-prints/people?kind=guardians')->json('data'))
+            ->firstWhere('id', $mother->id);
+        $this->assertStringContainsString('Tutor', $row['address']);
+        $this->assertSame('722 111 0000', $row['phone']);
     }
 
     public function test_guardian_batch_uses_grade_design_or_template_key(): void
@@ -395,9 +516,20 @@ class GuardianCredentialTest extends TestCase
 
     private function student(string $first, string $last, string $grade, string $group, bool $active = true): Student
     {
+        return $this->studentInYear($first, $last, $grade, $group, $this->year, $active);
+    }
+
+    private function studentInYear(
+        string $first,
+        string $last,
+        string $grade,
+        string $group,
+        AcademicYear $year,
+        bool $active = true
+    ): Student {
         $gradeLevel = GradeLevel::query()->firstOrCreate(['name' => $grade]);
         $classGroup = ClassGroup::query()->firstOrCreate([
-            'academic_year_id' => $this->year->id,
+            'academic_year_id' => $year->id,
             'grade_level_id' => $gradeLevel->id,
             'name' => $group,
         ]);
@@ -406,7 +538,7 @@ class GuardianCredentialTest extends TestCase
         Enrollment::query()->create([
             'student_id' => $student->id,
             'class_group_id' => $classGroup->id,
-            'academic_year_id' => $this->year->id,
+            'academic_year_id' => $year->id,
             'status' => $active ? EnrollmentStatus::Active : EnrollmentStatus::Dropped,
         ]);
 

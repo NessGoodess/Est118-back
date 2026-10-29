@@ -9,6 +9,7 @@ use App\Models\Profile;
 use App\Models\Student;
 use App\Services\People\PersonAddressService;
 use App\Services\People\PersonProfileService;
+use App\Services\People\StudentGuardianPrimaryService;
 use App\Support\Curp;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
@@ -40,7 +41,7 @@ class StudentsService
             'enrollments.classGroup.academicYear',
             'enrollments.classGroup.schoolClasses.subject',
             'workshopEnrollments.workshop',
-            'guardians.profile',
+            'guardians.profile.address',
             'siblings.profile',
             'siblings.currentEnrollment.classGroup.gradeLevel',
         ])->findOrFail($id);
@@ -169,6 +170,9 @@ class StudentsService
                 $guardian->id => $pivot,
             ]);
 
+            // First tutor / data gaps: always leave exactly one primary.
+            app(StudentGuardianPrimaryService::class)->ensureExactlyOne((int) $student->id);
+
             if (($data['address_mode'] ?? '') === 'student') {
                 if (! $studentProfile->address_id) {
                     throw new RuntimeException('El alumno no tiene domicilio capturado.');
@@ -211,16 +215,7 @@ class StudentsService
             $student->guardians()->detach($guardian->id);
 
             if ($wasPrimary) {
-                $next = $student->guardians()->first();
-                if ($next) {
-                    DB::table('guardian_student')
-                        ->where('student_id', $student->id)
-                        ->update(['is_primary' => false]);
-                    DB::table('guardian_student')
-                        ->where('student_id', $student->id)
-                        ->where('guardian_id', $next->id)
-                        ->update(['is_primary' => true]);
-                }
+                app(StudentGuardianPrimaryService::class)->ensureExactlyOne((int) $student->id);
             }
 
             return $this->findForDetail($student->id);

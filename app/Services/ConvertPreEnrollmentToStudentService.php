@@ -264,6 +264,13 @@ class ConvertPreEnrollmentToStudentService
                     ['Kinship' => $locked->guardian_relationship ?: 'TUTOR']
                 );
 
+                // Default: share student domicile when tutor has none (credentials need an address).
+                // Distinct tutor address is set later from the student detail form if needed.
+                if (! $guardianProfile->address_id && $studentProfile->address_id) {
+                    $guardianProfile->address_id = $studentProfile->address_id;
+                    $guardianProfile->save();
+                }
+
                 $alreadyLinked = $student->guardians()->where('guardians.id', $guardian->id)->exists();
                 $rel = $locked->guardian_relationship ?: null;
                 $student->guardians()->syncWithoutDetaching([

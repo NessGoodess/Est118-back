@@ -5,9 +5,11 @@ namespace Tests\Feature\School;
 use App\Enums\EnrollmentStatus;
 use App\Enums\WorkshopEnrollmentSource;
 use App\Models\AcademicYear;
+use App\Models\Address;
 use App\Models\ClassGroup;
 use App\Models\Enrollment;
 use App\Models\GradeLevel;
+use App\Models\Guardian;
 use App\Models\PreEnrollment;
 use App\Models\Profile;
 use App\Models\Student;
@@ -68,9 +70,64 @@ class NewIntakeServiceTest extends TestCase
         $guardianProfile = $student->guardians->first()?->profile;
         $this->assertSame('RUIZ', $guardianProfile?->last_name);
         $this->assertSame('DIAZ', $guardianProfile?->second_last_name);
+        $this->assertNotNull($student->profile->address_id);
+        $this->assertSame($student->profile->address_id, $guardianProfile?->address_id);
 
         $this->postJson('/api/new-intakes', $this->payload($second->id, $group->id, $workshop->id))
             ->assertStatus(422);
+    }
+
+    public function test_new_intake_does_not_overwrite_existing_guardian_address(): void
+    {
+        $year = AcademicYear::factory()->create([
+            'is_active' => true,
+            'year_start' => '2026',
+            'year_end' => '2027',
+        ]);
+        $second = GradeLevel::query()->create(['name' => '2°']);
+        GradeLevel::query()->create(['name' => '1°']);
+        $group = ClassGroup::query()->create([
+            'academic_year_id' => $year->id,
+            'grade_level_id' => $second->id,
+            'name' => 'C',
+        ]);
+        $workshop = Workshop::query()->create([
+            'code' => 'INFORMATICA',
+            'name' => 'Informática',
+            'is_active' => true,
+        ]);
+        $user = User::factory()->create();
+        Permission::findOrCreate('edit students', 'web');
+        $user->givePermissionTo('edit students');
+        Sanctum::actingAs($user);
+
+        $ownAddress = Address::query()->create([
+            'street_type' => 'Calle',
+            'street_name' => 'TutorPropio',
+            'house_number' => '5',
+            'neighborhood_type' => 'Colonia',
+            'neighborhood_name' => 'Centro',
+            'postal_code' => '50000',
+            'city' => 'Toluca',
+            'state' => 'México',
+        ]);
+        $guardianProfile = Profile::query()->create([
+            'national_id' => 'RUDR850101MMCZNSA8',
+            'first_name' => 'ROSA',
+            'last_name' => 'RUIZ',
+            'gender' => 'F',
+            'address_id' => $ownAddress->id,
+        ]);
+        Guardian::query()->create(['profile_id' => $guardianProfile->id, 'Kinship' => 'Madre']);
+
+        $response = $this->postJson(
+            '/api/new-intakes',
+            $this->payload($second->id, $group->id, $workshop->id)
+        )->assertCreated();
+
+        $student = Student::query()->with('profile')->find($response->json('data.student_id'));
+        $this->assertNotSame($ownAddress->id, $student->profile->address_id);
+        $this->assertSame($ownAddress->id, $guardianProfile->fresh()->address_id);
     }
 
     public function test_student_contact_and_guardian_curp_are_optional(): void

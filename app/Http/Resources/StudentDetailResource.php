@@ -134,7 +134,10 @@ class StudentDetailResource extends JsonResource
                 ];
             }),
             'guardians' => $student->guardians->map(
-                fn ($guardian) => $this->guardianPayload($guardian)
+                fn ($guardian) => $this->guardianPayload(
+                    $guardian,
+                    $profile?->address_id ? (int) $profile->address_id : null
+                )
             ),
             'siblings' => $student->relationLoaded('siblings')
                 ? $student->siblings->map(function (Student $sibling) {
@@ -157,10 +160,12 @@ class StudentDetailResource extends JsonResource
     /**
      * @return array<string, mixed>
      */
-    private function guardianPayload(Guardian $guardian): array
+    private function guardianPayload(Guardian $guardian, ?int $studentAddressId = null): array
     {
         $profile = $guardian->profile;
         $birth = $profile?->birth_date ? Carbon::parse($profile->birth_date) : null;
+        $address = $profile?->relationLoaded('address') ? $profile->address : null;
+        $guardianAddressId = $profile?->address_id ? (int) $profile->address_id : null;
 
         return [
             'id' => $guardian->id,
@@ -179,6 +184,22 @@ class StudentDetailResource extends JsonResource
             'birth_year' => $birth?->year,
             'gender' => $profile?->gender,
             'age' => $birth?->age,
+            'address_id' => $guardianAddressId,
+            'shares_student_address' => $studentAddressId !== null
+                && $guardianAddressId !== null
+                && $guardianAddressId === $studentAddressId,
+            'address_detail' => $address ? [
+                'street_type' => $address->street_type,
+                'street_name' => $address->street_name,
+                'house_number' => $address->house_number,
+                'unit_number' => $address->unit_number,
+                'apartament_number' => $address->unit_number,
+                'neighborhood_type' => $address->neighborhood_type,
+                'neighborhood_name' => $address->neighborhood_name,
+                'postal_code' => $address->postal_code,
+                'city' => $address->city,
+                'state' => $address->state,
+            ] : null,
             'photos' => app(PersonPhotoPathService::class)->currentUrls(PersonPhotoKind::Guardians, $guardian->id),
         ];
     }

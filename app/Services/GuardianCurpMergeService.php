@@ -6,8 +6,11 @@ use App\Exceptions\GuardianCurpConflictException;
 use App\Models\Guardian;
 use App\Models\Profile;
 use App\Models\Student;
+use App\Services\People\PersonAddressService;
+use App\Services\People\StudentGuardianPrimaryService;
 use App\Support\Curp;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 class GuardianCurpMergeService
@@ -82,9 +85,10 @@ class GuardianCurpMergeService
             $pivot['sort_order'] = (int) $data['sort_order'];
         }
         if (array_key_exists('is_primary', $data) || array_key_exists('is_secondary', $data)) {
+            $wasPrimary = (bool) ($student->guardians()->whereKey($guardian->id)->first()?->pivot?->is_primary ?? false);
             $isPrimary = array_key_exists('is_primary', $data)
                 ? (bool) $data['is_primary']
-                : (bool) ($student->guardians()->whereKey($guardian->id)->first()?->pivot?->is_primary ?? false);
+                : $wasPrimary;
             $isSecondary = array_key_exists('is_secondary', $data)
                 ? (bool) $data['is_secondary']
                 : (bool) ($student->guardians()->whereKey($guardian->id)->first()?->pivot?->is_secondary ?? false);
@@ -92,6 +96,16 @@ class GuardianCurpMergeService
             // Primary wins if both are requested; roles are mutually exclusive.
             if ($isPrimary) {
                 $isSecondary = false;
+            }
+
+            // Marking secondary clears primary — same as an explicit demotion.
+            if ($isSecondary) {
+                $isPrimary = false;
+            }
+
+            if ($wasPrimary && ! $isPrimary) {
+                app(StudentGuardianPrimaryService::class)
+                    ->assertCanClearPrimary((int) $student->id, (int) $guardian->id);
             }
 
             $pivot['is_primary'] = $isPrimary;
@@ -118,7 +132,52 @@ class GuardianCurpMergeService
         }
         $student->guardians()->updateExistingPivot($guardian->id, $pivot);
 
+        if (array_key_exists('address_mode', $data) && $data['address_mode'] !== null && $data['address_mode'] !== '') {
+            $this->applyAddressMode($student, $profile, (string) $data['address_mode'], $data);
+        }
+
+        app(StudentGuardianPrimaryService::class)->ensureExactlyOne((int) $student->id);
+
         return app(StudentsService::class)->findForDetail($student->id);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function applyAddressMode(Student $student, Profile $profile, string $mode, array $data): void
+    {
+        $student->loadMissing('profile');
+        $studentAddressId = $student->profile?->address_id
+            ? (int) $student->profile->address_id
+            : null;
+
+        if ($mode === 'student') {
+            if (! $studentAddressId) {
+                throw ValidationException::withMessages([
+                    'address_mode' => ['El alumno no tiene domicilio capturado.'],
+                ]);
+            }
+            $profile->address_id = $studentAddressId;
+            $profile->save();
+
+            return;
+        }
+
+        if ($mode !== 'new') {
+            return;
+        }
+
+        $addressData = is_array($data['address'] ?? null) ? $data['address'] : [];
+
+        // If currently sharing the student's address, detach first so upsert creates a new row
+        // instead of mutating the student's domicile.
+        if ($studentAddressId && (int) ($profile->address_id ?? 0) === $studentAddressId) {
+            $profile->address_id = null;
+            $profile->save();
+            $profile->unsetRelation('address');
+        }
+
+        app(PersonAddressService::class)->upsertFor($profile, $addressData);
     }
 
     /**

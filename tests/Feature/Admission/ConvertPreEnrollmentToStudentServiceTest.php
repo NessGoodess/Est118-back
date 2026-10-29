@@ -8,9 +8,11 @@ use App\Enums\PaymentStatus;
 use App\Enums\PreEnrollmentStatus;
 use App\Exceptions\AdmissionConversionException;
 use App\Models\AcademicYear;
+use App\Models\Address;
 use App\Models\ClassGroup;
 use App\Models\Enrollment;
 use App\Models\GradeLevel;
+use App\Models\Guardian;
 use App\Models\PreEnrollment;
 use App\Models\Profile;
 use App\Models\Student;
@@ -90,6 +92,77 @@ class ConvertPreEnrollmentToStudentServiceTest extends TestCase
 
         $this->assertDatabaseCount('students', 0);
         $this->assertNull($preEnrollment->fresh()->converted_student_id);
+    }
+
+    public function test_conversion_shares_student_address_with_guardian_without_one(): void
+    {
+        $academicYear = AcademicYear::factory()->create(['is_active' => true]);
+        $grade = GradeLevel::create(['name' => '1°']);
+        ClassGroup::create([
+            'academic_year_id' => $academicYear->id,
+            'grade_level_id' => $grade->id,
+            'name' => 'A',
+        ]);
+
+        $preEnrollment = PreEnrollment::factory()->create([
+            'status' => PreEnrollmentStatus::IN_REVIEW,
+            'documents_status' => DocumentsStatus::COMPLETE,
+            'payment_status' => PaymentStatus::VALIDATED,
+        ]);
+
+        $result = app(ConvertPreEnrollmentToStudentService::class)
+            ->convert($preEnrollment, ['academic_year_id' => $academicYear->id]);
+
+        $student = $result['student']->load(['profile', 'guardians.profile']);
+        $guardianProfile = $student->guardians->first()?->profile;
+
+        $this->assertNotNull($student->profile->address_id);
+        $this->assertNotNull($guardianProfile);
+        $this->assertSame($student->profile->address_id, $guardianProfile->address_id);
+    }
+
+    public function test_conversion_does_not_overwrite_existing_guardian_address(): void
+    {
+        $academicYear = AcademicYear::factory()->create(['is_active' => true]);
+        $grade = GradeLevel::create(['name' => '1°']);
+        ClassGroup::create([
+            'academic_year_id' => $academicYear->id,
+            'grade_level_id' => $grade->id,
+            'name' => 'A',
+        ]);
+
+        $ownAddress = Address::query()->create([
+            'street_type' => 'Av.',
+            'street_name' => 'TutorSolo',
+            'house_number' => '9',
+            'neighborhood_type' => 'Colonia',
+            'neighborhood_name' => 'Norte',
+            'postal_code' => '50000',
+            'city' => 'Toluca',
+            'state' => 'México',
+        ]);
+
+        $preEnrollment = PreEnrollment::factory()->create([
+            'status' => PreEnrollmentStatus::IN_REVIEW,
+            'documents_status' => DocumentsStatus::COMPLETE,
+            'payment_status' => PaymentStatus::VALIDATED,
+        ]);
+
+        $guardianProfile = Profile::query()->create([
+            'national_id' => strtoupper(trim((string) $preEnrollment->guardian_curp)),
+            'first_name' => $preEnrollment->guardian_first_name,
+            'last_name' => $preEnrollment->guardian_last_name,
+            'gender' => 'O',
+            'address_id' => $ownAddress->id,
+        ]);
+        Guardian::query()->create(['profile_id' => $guardianProfile->id, 'Kinship' => 'Madre']);
+
+        $result = app(ConvertPreEnrollmentToStudentService::class)
+            ->convert($preEnrollment, ['academic_year_id' => $academicYear->id]);
+
+        $studentAddressId = $result['student']->fresh()->profile->address_id;
+        $this->assertNotSame($ownAddress->id, $studentAddressId);
+        $this->assertSame($ownAddress->id, $guardianProfile->fresh()->address_id);
     }
 
     /**

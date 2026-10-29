@@ -46,10 +46,11 @@ class PrintJobService
         CredentialPrint $card,
         User $creator,
         string $sideMode = 'front',
-        string $printerId = self::DEFAULT_PRINTER_ID
+        string $printerId = self::DEFAULT_PRINTER_ID,
+        ?int $gradeLevelId = null
     ): PrintJob {
         if ($card->student_id === null) {
-            return $this->createJobForPersonCard($card, $creator, $sideMode, $printerId);
+            return $this->createJobForPersonCard($card, $creator, $sideMode, $printerId, $gradeLevelId);
         }
 
         $student = $this->studentForPrint((int) $card->student_id);
@@ -97,7 +98,8 @@ class PrintJobService
         CredentialPrint $card,
         User $creator,
         string $sideMode,
-        string $printerId
+        string $printerId,
+        ?int $gradeLevelId = null
     ): PrintJob {
         $kind = $card->kind ?? CredentialHolderKind::Students;
         $holder = $this->personForPrint($kind, (int) $card->profile_id);
@@ -109,7 +111,9 @@ class PrintJobService
         }
 
         $facesMode = ($card->faces_mode ?? $design->faces_mode ?? 'single') === 'double' ? 'double' : 'single';
-        $payload = $this->cards->payloadFromPerson($kind, $holder);
+        $scopedGradeId = $gradeLevelId
+            ?? ($design->grade_level_id ? (int) $design->grade_level_id : null);
+        $payload = $this->cards->payloadFromPerson($kind, $holder, $scopedGradeId);
         $payload['orientation'] = $design->orientation === 'portrait' ? 'portrait' : 'landscape';
         $payload['faces_mode'] = $facesMode;
         $payload['design_key'] = $design->uuid;
@@ -144,7 +148,9 @@ class PrintJobService
             'kind' => ['Los alumnos se imprimen desde su propio flujo.'],
         ]);
 
-        $relations = $kind === CredentialHolderKind::Guardians ? GuardianCredentialData::RELATIONS : ['profile.address'];
+        $relations = $kind === CredentialHolderKind::Guardians
+            ? GuardianCredentialData::relations()
+            : ['profile.address'];
         $holder = $model::query()->with($relations)->where('profile_id', $profileId)->first();
         if (! $holder?->profile) {
             throw ValidationException::withMessages([

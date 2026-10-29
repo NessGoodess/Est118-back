@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Guardian;
 use App\Models\Student;
+use App\Services\People\StudentGuardianPrimaryService;
 use Illuminate\Database\Eloquent\Builder;
 use RuntimeException;
 
@@ -142,6 +143,8 @@ class StudentSiblingService
                 ? ['relationship' => $rel]
                 : $student->guardianAttachPivot($rel),
         ]);
+
+        app(StudentGuardianPrimaryService::class)->ensureExactlyOne((int) $student->id);
 
         return app(StudentsService::class)->findForDetail($student->id);
     }

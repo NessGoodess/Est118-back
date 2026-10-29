@@ -161,6 +161,14 @@ class NewIntakeService
                 ['profile_id' => $guardianProfile->id],
                 ['Kinship' => $data['guardian_relationship']]
             );
+
+            // Default: share student domicile when tutor has none (credentials need an address).
+            // Distinct tutor address is set later from the student detail form if needed.
+            if (! $guardianProfile->address_id && $profile->address_id) {
+                $guardianProfile->address_id = $profile->address_id;
+                $guardianProfile->save();
+            }
+
             $student->guardians()->syncWithoutDetaching([
                 $guardian->id => $student->guardianAttachPivot($data['guardian_relationship']),
             ]);

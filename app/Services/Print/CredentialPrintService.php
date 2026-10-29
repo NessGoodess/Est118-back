@@ -180,7 +180,7 @@ class CredentialPrintService
         }
         $batchUuid = (string) Str::uuid();
 
-        return DB::transaction(function () use ($kind, $ids, $holders, $user, $design, $facesMode, $printerId, $batchUuid, $strategy) {
+        return DB::transaction(function () use ($kind, $ids, $holders, $user, $design, $facesMode, $printerId, $batchUuid, $strategy, $gradeLevelId) {
             $openCards = CredentialPrint::query()
                 ->open()
                 ->where('kind', $kind->value)
@@ -238,13 +238,13 @@ class CredentialPrintService
 
             if ($cards->isNotEmpty()) {
                 if ($strategy === PrintBatchStrategy::BackOnly) {
-                    $this->enqueue($cards->pluck('id')->all(), 'back', $user, $printerId);
+                    $this->enqueue($cards->pluck('id')->all(), 'back', $user, $printerId, $gradeLevelId);
                 } elseif ($strategy === PrintBatchStrategy::PerCard) {
                     foreach ($cards as $card) {
-                        $this->enqueue([(int) $card->id], 'front', $user, $printerId);
+                        $this->enqueue([(int) $card->id], 'front', $user, $printerId, $gradeLevelId);
                     }
                 } else {
-                    $this->enqueue($cards->pluck('id')->all(), 'front', $user, $printerId);
+                    $this->enqueue($cards->pluck('id')->all(), 'front', $user, $printerId, $gradeLevelId);
                 }
             }
 
@@ -322,7 +322,8 @@ class CredentialPrintService
         array $cardIds,
         string $side,
         User $user,
-        string $printerId = PrintJobService::DEFAULT_PRINTER_ID
+        string $printerId = PrintJobService::DEFAULT_PRINTER_ID,
+        ?int $gradeLevelId = null
     ): Collection {
         $side = $side === 'back' ? 'back' : 'front';
         $cardIds = array_values(array_unique(array_map('intval', $cardIds)));
@@ -332,7 +333,7 @@ class CredentialPrintService
             ]);
         }
 
-        return DB::transaction(function () use ($cardIds, $side, $user, $printerId) {
+        return DB::transaction(function () use ($cardIds, $side, $user, $printerId, $gradeLevelId) {
             $cards = CredentialPrint::query()
                 ->whereIn('id', $cardIds)
                 ->lockForUpdate()
@@ -352,7 +353,7 @@ class CredentialPrintService
             $jobs = collect();
             foreach ($ordered as $card) {
                 $this->assertCanEnqueue($card, $side);
-                $jobs->push($this->printJobs->createJobForCard($card, $user, $side, $printerId));
+                $jobs->push($this->printJobs->createJobForCard($card, $user, $side, $printerId, $gradeLevelId));
             }
 
             return $jobs;

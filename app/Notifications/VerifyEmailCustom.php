@@ -21,7 +21,7 @@ class VerifyEmailCustom extends VerifyEmail
                 'title_warning' => __('emails.verify.title-warning'),
                 'warning' => __('emails.verify.warning'),
                 'footer' => __('emails.verify.footer'),
-                'school_name' => 'Escuela Secundaria Técnica No. 118',
+                'school_name' => config('app.school_name'),
             ]);
             /*->withSymfonyMessage(function ($message) {
                 $path = public_path('storage/images/Logo_EST118.png');

@@ -4,19 +4,23 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Access\AccountActivationService;
 use Illuminate\Auth\Events\Registered;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\Rules;
+use Illuminate\Support\Str;
 
 class RegisteredUserController extends Controller
 {
+    public function __construct(
+        private readonly AccountActivationService $activations,
+    ) {}
+
     /**
-     * Handle an incoming registration request.
-     * Only accessible by authenticated users with 'create users' permission.
+     * Create a user without an admin-chosen password; send activation email.
      *
      * @throws \Illuminate\Validation\ValidationException
      */
@@ -25,7 +29,6 @@ class RegisteredUserController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
-            'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'roles' => ['sometimes', 'array'],
             'roles.*' => ['string', 'exists:roles,name'],
             'permissions' => ['sometimes', 'array'],
@@ -37,7 +40,7 @@ class RegisteredUserController extends Controller
                 $user = User::create([
                     'name' => $validated['name'],
                     'email' => $validated['email'],
-                    'password' => Hash::make($validated['password']),
+                    'password' => Hash::make(Str::random(64)),
                 ]);
 
                 $roles = $validated['roles'] ?? [];
@@ -64,13 +67,12 @@ class RegisteredUserController extends Controller
 
         event(new Registered($user));
 
-        // Email after commit — failure must not look like a failed create
         $emailSent = true;
         try {
-            $user->sendEmailVerificationNotification();
+            $this->activations->issueForUser($user, $request->user());
         } catch (\Throwable $th) {
             $emailSent = false;
-            Log::warning('User created but verification email failed', [
+            Log::warning('User created but activation email failed', [
                 'user_id' => $user->id,
                 'error' => $th->getMessage(),
             ]);
@@ -79,7 +81,7 @@ class RegisteredUserController extends Controller
         return response()->json([
             'message' => $emailSent
                 ? __('auth.create-user')
-                : __('auth.create-user').' (el correo de verificación no se pudo enviar)',
+                : __('auth.create-user').' (el correo de activación no se pudo enviar)',
             'user' => $user,
             'email_sent' => $emailSent,
         ], 201);

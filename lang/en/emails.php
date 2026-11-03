@@ -13,6 +13,30 @@ return [
         'footer'  => 'This is an automated email, please do not reply.',
     ],
 
+    'access_invite' => [
+        'subject' => 'System access invitation',
+        'title' => 'Access invitation',
+        'intro' => 'Hello :name, you have been invited to create an account in the institutional system.',
+        'content' => 'Use the button to set your password and activate access. The link is tied to your school profile.',
+        'action' => 'Accept invitation',
+        'alt' => 'If the button does not work, copy and paste this URL into your browser:',
+        'title-warning' => 'Important:',
+        'warning' => 'If you were not expecting this invitation, you can ignore this message. The link expires in 7 days.',
+        'footer' => 'This is an automated email, please do not reply.',
+    ],
+
+    'account_activation' => [
+        'subject' => 'Activate your account',
+        'title' => 'Account activation',
+        'intro' => 'Hello :name, an account was created for you in the institutional system.',
+        'content' => 'Set your password with the button to activate access. Nobody else chooses or knows your password.',
+        'action' => 'Activate account',
+        'alt' => 'If the button does not work, copy and paste this URL into your browser:',
+        'title-warning' => 'Important:',
+        'warning' => 'If you were not expecting this message, ignore it. The link expires in 7 days.',
+        'footer' => 'This is an automated email, please do not reply.',
+    ],
+
     'pre_enrollment' => [
         'subject' => 'Pre-enrollment Registered!',
         'header' => [

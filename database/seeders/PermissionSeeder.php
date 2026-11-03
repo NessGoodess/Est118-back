@@ -34,12 +34,14 @@ class PermissionSeeder extends Seeder
             'create teachers',
             'edit teachers',
             'delete teachers',
+            'invite teacher accounts',
 
             // Staff
             'view staff',
             'create staff',
             'edit staff',
             'delete staff',
+            'invite staff accounts',
             'view student photos',
             'manage student photos',
 

@@ -57,6 +57,35 @@ protected $fillable = [
     }
 
     /**
+     * Active linked account (soft-deleted users do not count).
+     * Clears a stale user_id left after deletes that predate unlink-on-delete.
+     */
+    public function linkedUser(): ?User
+    {
+        $user = $this->user;
+        if ($user) {
+            return $user;
+        }
+
+        if ($this->user_id !== null) {
+            $this->forceFill(['user_id' => null])->save();
+            $this->unsetRelation('user');
+        }
+
+        return null;
+    }
+
+    public function hasLinkedUser(): bool
+    {
+        return $this->linkedUser() !== null;
+    }
+
+    public function accessInvites(): HasMany
+    {
+        return $this->hasMany(ProfileAccessInvite::class);
+    }
+
+    /**
      * Get the student associated with the profile
      *
      * @return \Illuminate\Database\Eloquent\Relations\HasOne

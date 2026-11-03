@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Staff;
 
 use App\Enums\PersonPhotoKind;
+use App\Http\Resources\People\ProfileAccessAccountResource;
 use App\Http\Resources\People\ProfileResource;
 use App\Models\Staff;
 use App\Services\People\PersonPhotoPathService;
@@ -34,6 +35,9 @@ class StaffDetailResource extends JsonResource
                 'status' => $staff->status instanceof \BackedEnum ? $staff->status->value : $staff->status,
             ],
             'photos' => app(PersonPhotoPathService::class)->currentUrls(PersonPhotoKind::Staff, $staff->id),
+            'access_account' => $staff->profile
+                ? (new ProfileAccessAccountResource($staff->profile))->toArray($request)
+                : ['has_user' => false, 'user_id' => null, 'pending_invite' => null, 'link_candidate' => null],
         ];
     }
 }

@@ -49,11 +49,15 @@ use App\Http\Controllers\People\PersonPhotoFileController;
 use App\Http\Controllers\Staff\StaffController;
 use App\Http\Controllers\Staff\StaffPhotoController;
 use App\Http\Controllers\students\GradeLevelController;
+use App\Http\Controllers\Access\AccountActivationController;
+use App\Http\Controllers\Access\ProfileAccessInviteController;
+use App\Http\Controllers\Access\ProfileAccessLinkController;
 use App\Http\Controllers\Teachers\TeacherClassController;
 use App\Http\Controllers\Teachers\TeacherController;
 use App\Http\Controllers\Teachers\TeacherPhotoController;
 use App\Http\Controllers\students\PrivateImageController;
 use App\Http\Controllers\TelegramController;
+use App\Http\Controllers\User\UserPreferencesController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WorkshopController;
 use App\Http\Controllers\WorkshopOfferingController;
@@ -75,10 +79,12 @@ Route::prefix('notifications')->middleware(['auth:sanctum', 'verified'])->group(
 
 Route::middleware(['auth:sanctum', 'verified'])->get('/user', function (Request $request) {
     $user = $request->user();
-    $user->load('roles.permissions', 'permissions', 'profile.teacher');
+    $user->load('roles.permissions', 'permissions', 'profile.teacher', 'profile.staff', 'preference');
 
     return new UserResource($user);
 });
+
+Route::middleware(['auth:sanctum', 'verified'])->patch('/user/preferences', [UserPreferencesController::class, 'update']);
 
 /**
  * Current User
@@ -709,6 +715,18 @@ Route::prefix('teachers')->middleware('auth:sanctum', 'verified')->group(functio
     Route::post('/{teacher}/photo', [TeacherPhotoController::class, 'upload'])
         ->whereNumber('teacher')
         ->middleware('permission:edit teachers');
+    Route::post('/{teacher}/access-invite', [ProfileAccessInviteController::class, 'storeTeacher'])
+        ->whereNumber('teacher')
+        ->middleware('permission:invite teacher accounts');
+    Route::delete('/{teacher}/access-invite', [ProfileAccessInviteController::class, 'destroyTeacher'])
+        ->whereNumber('teacher')
+        ->middleware('permission:invite teacher accounts');
+    Route::get('/{teacher}/access-link-match', [ProfileAccessLinkController::class, 'matchTeacher'])
+        ->whereNumber('teacher')
+        ->middleware('permission:invite teacher accounts');
+    Route::post('/{teacher}/access-link', [ProfileAccessLinkController::class, 'linkTeacher'])
+        ->whereNumber('teacher')
+        ->middleware('permission:invite teacher accounts');
 });
 
 Route::prefix('staff')->middleware('auth:sanctum', 'verified')->group(function () {
@@ -731,6 +749,32 @@ Route::prefix('staff')->middleware('auth:sanctum', 'verified')->group(function (
     Route::post('/{staff}/photo', [StaffPhotoController::class, 'upload'])
         ->whereNumber('staff')
         ->middleware('permission:edit staff');
+    Route::post('/{staff}/access-invite', [ProfileAccessInviteController::class, 'storeStaff'])
+        ->whereNumber('staff')
+        ->middleware('permission:invite staff accounts');
+    Route::delete('/{staff}/access-invite', [ProfileAccessInviteController::class, 'destroyStaff'])
+        ->whereNumber('staff')
+        ->middleware('permission:invite staff accounts');
+    Route::get('/{staff}/access-link-match', [ProfileAccessLinkController::class, 'matchStaff'])
+        ->whereNumber('staff')
+        ->middleware('permission:invite staff accounts');
+    Route::post('/{staff}/access-link', [ProfileAccessLinkController::class, 'linkStaff'])
+        ->whereNumber('staff')
+        ->middleware('permission:invite staff accounts');
+});
+
+Route::prefix('access-invites')->middleware('throttle:10,1')->group(function () {
+    Route::get('/{token}', [ProfileAccessInviteController::class, 'show'])
+        ->where('token', '[A-Za-z0-9_-]+');
+    Route::post('/{token}/accept', [ProfileAccessInviteController::class, 'accept'])
+        ->where('token', '[A-Za-z0-9_-]+');
+});
+
+Route::prefix('account-activations')->middleware('throttle:10,1')->group(function () {
+    Route::get('/{token}', [AccountActivationController::class, 'show'])
+        ->where('token', '[A-Za-z0-9_-]+');
+    Route::post('/{token}/accept', [AccountActivationController::class, 'accept'])
+        ->where('token', '[A-Za-z0-9_-]+');
 });
 
 Route::prefix('guardians')->middleware('auth:sanctum', 'verified')->group(function () {

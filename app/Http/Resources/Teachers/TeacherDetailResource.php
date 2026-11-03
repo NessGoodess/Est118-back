@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Teachers;
 
 use App\Enums\PersonPhotoKind;
+use App\Http\Resources\People\ProfileAccessAccountResource;
 use App\Http\Resources\People\ProfileResource;
 use App\Models\Teacher;
 use App\Services\People\PersonPhotoPathService;
@@ -37,6 +38,9 @@ class TeacherDetailResource extends JsonResource
             ],
             'classes' => TeacherClassOptionResource::collection($teacher->schoolClasses ?? [])->resolve(),
             'photos' => app(PersonPhotoPathService::class)->currentUrls(PersonPhotoKind::Teachers, $teacher->id),
+            'access_account' => $teacher->profile
+                ? (new ProfileAccessAccountResource($teacher->profile))->toArray($request)
+                : ['has_user' => false, 'user_id' => null, 'pending_invite' => null, 'link_candidate' => null],
         ];
     }
 }

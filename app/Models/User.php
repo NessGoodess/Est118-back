@@ -30,6 +30,14 @@ class User extends Authenticatable
         'password',
     ];
 
+    protected static function booted(): void
+    {
+        static::deleting(function (User $user): void {
+            // Soft/hard delete: free profiles so staff/teachers stop showing "Con cuenta".
+            Profile::query()->where('user_id', $user->id)->update(['user_id' => null]);
+        });
+    }
+
     /**
      * The attributes that should be hidden for serialization.
      *
@@ -72,6 +80,11 @@ class User extends Authenticatable
     public function profile(): HasOne
     {
         return $this->hasOne(Profile::class);
+    }
+
+    public function preference(): HasOne
+    {
+        return $this->hasOne(UserPreference::class);
     }
 
     /**

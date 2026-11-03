@@ -13,6 +13,30 @@ return [
         'footer' => 'Este es un correo automático, por favor no responda a este mensaje.',
     ],
 
+    'access_invite' => [
+        'subject' => 'Invitación de acceso al sistema',
+        'title' => 'Invitación de acceso',
+        'intro' => 'Hola :name, se te ha invitado a crear una cuenta en el sistema institucional.',
+        'content' => 'Usa el botón para definir tu contraseña y activar el acceso. El enlace está vinculado a tu perfil en la escuela.',
+        'action' => 'Aceptar invitación',
+        'alt' => 'Si el botón no funciona, copie y pegue el siguiente enlace en su navegador:',
+        'title-warning' => 'Importante:',
+        'warning' => 'Si no esperabas esta invitación, puedes ignorar este mensaje. El enlace caduca en 7 días.',
+        'footer' => 'Este es un correo automático, por favor no responda a este mensaje.',
+    ],
+
+    'account_activation' => [
+        'subject' => 'Activa tu cuenta',
+        'title' => 'Activación de cuenta',
+        'intro' => 'Hola :name, se creó una cuenta para ti en el sistema institucional.',
+        'content' => 'Define tu contraseña con el botón para activar el acceso. Nadie más conoce ni elige tu contraseña.',
+        'action' => 'Activar cuenta',
+        'alt' => 'Si el botón no funciona, copie y pegue el siguiente enlace en su navegador:',
+        'title-warning' => 'Importante:',
+        'warning' => 'Si no esperabas este mensaje, ignóralo. El enlace caduca en 7 días.',
+        'footer' => 'Este es un correo automático, por favor no responda a este mensaje.',
+    ],
+
     'pre_enrollment' => [
         'subject' => '¡Preinscripción Registrada!',
         'header' => [

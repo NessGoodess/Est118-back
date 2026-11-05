@@ -55,6 +55,7 @@ class CardTemplateController extends Controller
             'grades.*' => ['integer'],
             'description' => ['sometimes', 'string', 'max:500'],
             'from_key' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'is_shared' => ['sometimes', 'boolean'],
         ]);
 
         /** @var User $user */
@@ -81,6 +82,7 @@ class CardTemplateController extends Controller
             'meta.grade_level_id' => ['sometimes', 'nullable', 'integer', 'exists:grade_levels,id'],
             'meta.grades' => ['sometimes', 'array'],
             'meta.description' => ['sometimes', 'string', 'max:500'],
+            'meta.is_shared' => ['sometimes', 'boolean'],
             'layout' => ['required', 'array'],
         ]);
 

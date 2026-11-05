@@ -139,7 +139,9 @@ class CardTemplateService
             'orientation' => $layout['orientation'],
             'faces_mode' => $layout['faces_mode'],
             'is_active' => true,
-            'is_shared' => false,
+            'is_shared' => array_key_exists('is_shared', $meta)
+                ? (bool) $meta['is_shared']
+                : true,
             'is_default' => false,
             'layout_json' => $layout,
         ]);
@@ -369,6 +371,7 @@ class CardTemplateService
             'grade_level_id' => $gradeId,
             'description' => $design->description,
             'user_id' => $design->user_id,
+            'is_shared' => (bool) $design->is_shared,
         ];
     }
 
@@ -382,7 +385,7 @@ class CardTemplateService
         $gradeId = $meta['grade_level_id'] ?? ($meta['grades'][0] ?? null);
         $gradeId = $gradeId !== null && $gradeId !== '' ? (int) $gradeId : null;
 
-        $design->fill([
+        $payload = [
             'name' => $name !== '' ? $name : $design->name,
             'audience' => in_array(($meta['audience'] ?? $design->audience), self::AUDIENCES, true)
                 ? ($meta['audience'] ?? $design->audience)
@@ -392,7 +395,11 @@ class CardTemplateService
             'orientation' => $layout['orientation'] ?? $design->orientation,
             'faces_mode' => $layout['faces_mode'] ?? $design->faces_mode,
             'layout_json' => $layout,
-        ]);
+        ];
+        if (array_key_exists('is_shared', $meta)) {
+            $payload['is_shared'] = (bool) $meta['is_shared'];
+        }
+        $design->fill($payload);
         $design->save();
     }
 

@@ -101,6 +101,7 @@ class PersonCredentialPrintController extends Controller
                         'address' => $this->credentials->formatAddress($holder->profile->address),
                         'phone' => (string) ($holder->profile->phone_number ?? ''),
                         'second_guardian' => $this->guardians->secondGuardian($holder),
+                        'second_guardian_conflict' => $this->guardians->secondGuardianConflict($holder),
                     ];
                 }
 

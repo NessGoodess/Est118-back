@@ -3,9 +3,11 @@
 namespace App\Services;
 
 use App\Exceptions\GuardianCurpConflictException;
+use App\Exceptions\GuardianMultiStudentConfirmationException;
 use App\Models\Guardian;
 use App\Models\Profile;
 use App\Models\Student;
+use App\Services\People\GuardianLinkageReportService;
 use App\Services\People\PersonAddressService;
 use App\Services\People\StudentGuardianPrimaryService;
 use App\Support\Curp;
@@ -236,7 +238,8 @@ class GuardianCurpMergeService
      *   survivor?: 'draft'|'canonical',
      *   field_sources?: array{name?: string, phone?: string, email?: string, address?: string},
      *   relationship?: string|null,
-     *   pending?: array<string, mixed>|null
+     *   pending?: array<string, mixed>|null,
+     *   confirm_multi_student?: bool
      * }  $options
      */
     public function mergeGuardianByCurp(Student $student, array $options): Student
@@ -248,6 +251,7 @@ class GuardianCurpMergeService
             $sources = $options['field_sources'] ?? [];
             $pending = is_array($options['pending'] ?? null) ? $options['pending'] : null;
             $relationship = trim((string) ($options['relationship'] ?? ''));
+            $confirmed = (bool) ($options['confirm_multi_student'] ?? false);
 
             $canonical = Guardian::query()->with(['profile.address', 'students'])->find($canonicalId);
             if (! $canonical || ! $canonical->profile) {
@@ -265,6 +269,8 @@ class GuardianCurpMergeService
                 }
             }
 
+            $this->assertMultiStudentConfirmed($canonical, $draft, $confirmed);
+
             // Add-only conflict: attach canonical and optionally overwrite fields from pending.
             if (! $draft) {
                 if ($pending) {
@@ -280,6 +286,8 @@ class GuardianCurpMergeService
                         ? ['relationship' => $rel]
                         : $student->guardianAttachPivot($rel),
                 ]);
+
+                app(StudentGuardianPrimaryService::class)->normalizeRoles((int) $student->id);
 
                 return app(StudentsService::class)->findForDetail($student->id);
             }
@@ -335,20 +343,36 @@ class GuardianCurpMergeService
                     ?? '');
             }
 
-            // Reassign every student from discard onto survivor, keeping primary/sort when possible.
+            // Reassign every student from discard onto survivor, keeping primary/secondary/sort.
+            $affectedStudentIds = [];
             foreach ($discard->students as $linkedStudent) {
+                $affectedStudentIds[] = (int) $linkedStudent->id;
                 $pivotRel = $linkedStudent->pivot->relationship ?? $rel;
                 $pivotRel = $pivotRel === '' ? null : $pivotRel;
+                $discardPrimary = (bool) ($linkedStudent->pivot->is_primary ?? false);
+                $discardSecondary = (bool) ($linkedStudent->pivot->is_secondary ?? false);
                 $existingSurvivor = $linkedStudent->guardians()->where('guardians.id', $survivor->id)->first();
                 if ($existingSurvivor) {
-                    $linkedStudent->guardians()->syncWithoutDetaching([
-                        $survivor->id => ['relationship' => $pivotRel],
-                    ]);
-                } else {
+                    $keepPrimary = (bool) ($existingSurvivor->pivot->is_primary ?? false) || $discardPrimary;
+                    $keepSecondary = (bool) ($existingSurvivor->pivot->is_secondary ?? false) || $discardSecondary;
+                    if ($keepPrimary) {
+                        $keepSecondary = false;
+                    }
                     $linkedStudent->guardians()->syncWithoutDetaching([
                         $survivor->id => [
                             'relationship' => $pivotRel,
-                            'is_primary' => (bool) ($linkedStudent->pivot->is_primary ?? false),
+                            'is_primary' => $keepPrimary,
+                            'is_secondary' => $keepSecondary,
+                        ],
+                    ]);
+                } else {
+                    $isPrimary = $discardPrimary;
+                    $isSecondary = $discardSecondary && ! $isPrimary;
+                    $linkedStudent->guardians()->syncWithoutDetaching([
+                        $survivor->id => [
+                            'relationship' => $pivotRel,
+                            'is_primary' => $isPrimary,
+                            'is_secondary' => $isSecondary,
                             'sort_order' => (int) ($linkedStudent->pivot->sort_order ?? 0),
                         ],
                     ]);
@@ -365,6 +389,7 @@ class GuardianCurpMergeService
                     : $student->guardianAttachPivot($relNormalized),
             ]);
             $student->guardians()->detach($discard->id);
+            $affectedStudentIds[] = (int) $student->id;
 
             $discard->refresh();
             if (! $discard->students()->exists()) {
@@ -379,6 +404,11 @@ class GuardianCurpMergeService
                         $orphanProfile->delete();
                     }
                 }
+            }
+
+            $primaries = app(StudentGuardianPrimaryService::class);
+            foreach (array_unique($affectedStudentIds) as $affectedId) {
+                $primaries->normalizeRoles($affectedId);
             }
 
             return app(StudentsService::class)->findForDetail($student->id);
@@ -445,40 +475,31 @@ class GuardianCurpMergeService
      */
     private function canonicalGuardianPayload(Profile $profile): array
     {
-        $roles = [];
-        if ($profile->guardian) {
-            $roles[] = 'guardian';
-        }
-        if ($profile->teacher) {
-            $roles[] = 'teacher';
-        }
-        if ($profile->staff) {
-            $roles[] = 'staff';
-        }
-        if ($profile->student) {
-            $roles[] = 'student';
+        return app(GuardianLinkageReportService::class)->payloadForProfile($profile);
+    }
+
+    private function assertMultiStudentConfirmed(
+        Guardian $canonical,
+        ?Guardian $draft,
+        bool $confirmed
+    ): void {
+        $report = app(GuardianLinkageReportService::class);
+        $context = $report->payloadForGuardian($canonical);
+
+        // After a draft+canonical merge, linked students can grow; use the union size.
+        if ($draft) {
+            $ids = $canonical->students->pluck('id')
+                ->merge($draft->students->pluck('id'))
+                ->unique()
+                ->count();
+            $context['linked_count'] = $ids;
+            $context['requires_confirmation'] = $report->requiresConfirmation($ids);
         }
 
-        $students = [];
-        if ($profile->guardian) {
-            $profile->guardian->loadMissing('students.profile');
-            foreach ($profile->guardian->students as $linked) {
-                $students[] = [
-                    'id' => $linked->id,
-                    'name' => $linked->profile?->fullName() ?? '',
-                ];
-            }
+        if (! ($context['requires_confirmation'] ?? false) || $confirmed) {
+            return;
         }
 
-        return [
-            'profile_id' => $profile->id,
-            'guardian_id' => $profile->guardian?->id,
-            'name' => $profile->fullName(),
-            'curp' => $profile->national_id,
-            'phone' => $profile->phone_number,
-            'email' => $profile->email,
-            'roles' => $roles,
-            'students' => $students,
-        ];
+        throw new GuardianMultiStudentConfirmationException($context);
     }
 }

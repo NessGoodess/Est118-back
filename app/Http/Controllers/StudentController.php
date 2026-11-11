@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
 use App\Exceptions\GuardianCurpConflictException;
+use App\Exceptions\GuardianMultiStudentConfirmationException;
 use App\Http\Requests\AttachStudentGuardianRequest;
 use App\Http\Requests\MergeStudentGuardianRequest;
 use App\Http\Requests\StoreStudentGuardianRequest;
@@ -246,7 +247,18 @@ class StudentController extends Controller
                 $student,
                 (int) $data['guardian_id'],
                 $data['relationship'] ?? null,
+                (bool) ($data['confirm_multi_student'] ?? false),
             );
+        } catch (GuardianMultiStudentConfirmationException $e) {
+            return response()->json([
+                'success' => false,
+                'code' => 'guardian_multi_student_confirm',
+                'message' => $e->getMessage(),
+                'canonical' => $e->context,
+                'requires_confirmation' => true,
+                'linked_count' => $e->context['linked_count'] ?? null,
+                'threshold' => $e->context['threshold'] ?? null,
+            ], 409);
         } catch (RuntimeException $e) {
             return response()->json([
                 'success' => false,
@@ -264,6 +276,16 @@ class StudentController extends Controller
     {
         try {
             $updated = $this->guardianCurpMergeService->mergeGuardianByCurp($student, $request->validated());
+        } catch (GuardianMultiStudentConfirmationException $e) {
+            return response()->json([
+                'success' => false,
+                'code' => 'guardian_multi_student_confirm',
+                'message' => $e->getMessage(),
+                'canonical' => $e->context,
+                'requires_confirmation' => true,
+                'linked_count' => $e->context['linked_count'] ?? null,
+                'threshold' => $e->context['threshold'] ?? null,
+            ], 409);
         } catch (RuntimeException $e) {
             return response()->json([
                 'success' => false,

@@ -166,28 +166,60 @@ class GuardianCredentialData
 
     /**
      * Explicit credential secondary for a primary holder's minors (is_secondary on pivot).
+     * Family consensus: print only when all primary actives share one secondary id
+     * (or only some have one, but it is the same person). Distinct secondaries → null + conflict.
      *
      * @return array{name: string, phone: string, kinship: string}|null
      */
     public function secondGuardian(Guardian $guardian): ?array
     {
+        $resolution = $this->resolveSecondGuardian($guardian);
+
+        return $resolution['guardian'];
+    }
+
+    /**
+     * @return array{guardian: array{name: string, phone: string, kinship: string}|null, conflict: bool}
+     */
+    public function resolveSecondGuardian(Guardian $guardian): array
+    {
+        $byId = [];
         foreach ($this->primaryActiveStudents($guardian) as $student) {
             $secondary = $student->guardians->first(
                 fn (Guardian $g) => (int) $g->id !== (int) $guardian->id
                     && $g->profile !== null
                     && (bool) ($g->pivot?->is_secondary ?? false)
             );
-
-            if ($secondary) {
-                return [
-                    'name' => $secondary->profile->fullName(),
-                    'phone' => trim((string) ($secondary->profile->phone_number ?? '')),
-                    'kinship' => trim((string) ($secondary->pivot?->relationship ?: ($secondary->Kinship ?? ''))),
-                ];
+            if (! $secondary) {
+                continue;
             }
+            $byId[(int) $secondary->id] = $secondary;
         }
 
-        return null;
+        if ($byId === []) {
+            return ['guardian' => null, 'conflict' => false];
+        }
+
+        if (count($byId) > 1) {
+            return ['guardian' => null, 'conflict' => true];
+        }
+
+        /** @var Guardian $secondary */
+        $secondary = array_values($byId)[0];
+
+        return [
+            'guardian' => [
+                'name' => $secondary->profile->fullName(),
+                'phone' => trim((string) ($secondary->profile->phone_number ?? '')),
+                'kinship' => trim((string) ($secondary->pivot?->relationship ?: ($secondary->Kinship ?? ''))),
+            ],
+            'conflict' => false,
+        ];
+    }
+
+    public function secondGuardianConflict(Guardian $guardian): bool
+    {
+        return $this->resolveSecondGuardian($guardian)['conflict'];
     }
 
     /**
@@ -195,7 +227,7 @@ class GuardianCredentialData
      * second_guardian is name / phone / kinship (one per line); the designer's
      * field label is the optional prefix drawn separately.
      *
-     * @return array{kinship: string, dependent: string, dependents: string, second_guardian: string}
+     * @return array{kinship: string, dependent: string, dependents: string, second_guardian: string, second_guardian_conflict: bool}
      */
     public function cardFields(
         Guardian $guardian,
@@ -206,7 +238,8 @@ class GuardianCredentialData
             fn (array $d) => trim($d['grade_group'].' · '.$d['last_names'].', '.$d['first_name']),
             $this->dependents($guardian, $gradeId, $groupId)
         );
-        $second = $this->secondGuardian($guardian);
+        $resolved = $this->resolveSecondGuardian($guardian);
+        $second = $resolved['guardian'];
 
         return [
             'kinship' => $this->kinship($guardian),
@@ -218,6 +251,7 @@ class GuardianCredentialData
                     fn (string $part) => $part !== ''
                 )))
                 : '',
+            'second_guardian_conflict' => $resolved['conflict'],
         ];
     }
 

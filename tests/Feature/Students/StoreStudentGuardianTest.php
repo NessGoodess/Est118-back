@@ -140,6 +140,87 @@ class StoreStudentGuardianTest extends TestCase
         $this->assertNull($guardian->profile->email);
     }
 
+    public function test_store_derives_birth_and_gender_from_curp_when_omitted(): void
+    {
+        $this->actingEditor();
+        $student = $this->student();
+
+        $this->postJson("/api/students/{$student->id}/guardians", [
+            'first_name' => 'Rosa',
+            'last_name' => 'Lopez',
+            'curp' => 'LOPR850101MDFPRS09',
+            'relationship' => 'Madre',
+            'address_mode' => 'new',
+            'address' => [
+                'street_type' => 'Calle',
+                'street_name' => 'Reforma',
+                'house_number' => '1',
+                'neighborhood_type' => 'Colonia',
+                'neighborhood_name' => 'Centro',
+                'postal_code' => '68000',
+                'city' => 'Oaxaca',
+                'state' => 'Oaxaca',
+            ],
+        ])->assertCreated();
+
+        $profile = $student->fresh()->guardians()->first()?->profile;
+        $this->assertNotNull($profile);
+        $this->assertSame('1985-01-01', optional($profile->birth_date)->format('Y-m-d') ?? (string) $profile->birth_date);
+        $this->assertSame('F', $profile->gender);
+    }
+
+    public function test_curp_conflict_includes_multi_student_flags(): void
+    {
+        $this->actingEditor();
+        config(['guardians.multi_student_warn_threshold' => 2]);
+
+        $existing = Profile::query()->create([
+            'national_id' => 'LOPR850101MDFPRS09',
+            'first_name' => 'Rosa',
+            'last_name' => 'Lopez',
+            'gender' => 'F',
+        ]);
+        $guardian = Guardian::query()->create(['profile_id' => $existing->id]);
+        foreach (['A', 'B', 'C'] as $i => $letter) {
+            $child = Student::query()->create([
+                'profile_id' => Profile::query()->create([
+                    'first_name' => "Hijo{$letter}",
+                    'last_name' => 'Lopez',
+                    'gender' => 'M',
+                ])->id,
+            ]);
+            $child->guardians()->attach($guardian->id, [
+                'relationship' => 'Madre',
+                'is_primary' => true,
+                'sort_order' => $i,
+            ]);
+        }
+
+        $student = $this->student();
+        $this->postJson("/api/students/{$student->id}/guardians", [
+            'first_name' => 'Rosa',
+            'last_name' => 'Lopez',
+            'curp' => 'LOPR850101MDFPRS09',
+            'relationship' => 'Madre',
+            'address_mode' => 'new',
+            'address' => [
+                'street_type' => 'Calle',
+                'street_name' => 'Reforma',
+                'house_number' => '1',
+                'neighborhood_type' => 'Colonia',
+                'neighborhood_name' => 'Centro',
+                'postal_code' => '68000',
+                'city' => 'Oaxaca',
+                'state' => 'Oaxaca',
+            ],
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'guardian_curp_exists')
+            ->assertJsonPath('canonical.requires_confirmation', true)
+            ->assertJsonPath('canonical.linked_count', 3)
+            ->assertJsonPath('canonical.threshold', 2);
+    }
+
     private function student(?int $addressId = null): Student
     {
         $profile = Profile::query()->create([

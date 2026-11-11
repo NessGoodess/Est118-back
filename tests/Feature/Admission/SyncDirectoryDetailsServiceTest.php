@@ -91,8 +91,52 @@ class SyncDirectoryDetailsServiceTest extends TestCase
         $this->assertSame('MALJ800101HOCRPR09', $new?->profile?->national_id);
         $this->assertSame('9512441693', $new?->profile?->phone_number);
         $this->assertSame('tutor.nuevo@escuela.mx', $new?->profile?->email);
+        $this->assertTrue((bool) $new?->pivot?->is_secondary);
+        $this->assertTrue((bool) $student->guardians->firstWhere('id', $oldTutor->id)?->pivot?->is_primary);
         $this->assertSame('9511111111', $oldTutor->profile->fresh()->phone_number);
         $this->assertNull($outside->profile->fresh()->phone_number);
+    }
+
+    public function test_reuses_existing_tutor_by_name_and_phone_instead_of_sentinel(): void
+    {
+        [$year, $group] = $this->period('1°');
+
+        $student = $this->makeStudent('AEHV140919MOCRRNA0', 'VANIA ZOE', 'ARELLANES HERNANDEZ');
+        $this->enroll($student, $year, $group);
+
+        $existing = $this->linkTutor(
+            $this->makeStudent('OTRO140101HOCRRNA1', 'OTRO', 'ALUMNO'),
+            'MALJ800101HOCRPR09',
+            'JUAN CARLOS',
+            'MARTINEZ LOPEZ',
+            '9512441693',
+            'ya@existe.mx'
+        );
+
+        $this->path = $this->tempPath('sync-reuse-name-phone');
+        $this->writeSplitDirectory($this->path, [
+            $this->row('VANIA ZOE', 'ARELLANES', 'HERNANDEZ', 'AEHV140919MOCRRNA0', [
+                'g_paterno' => 'MARTINEZ',
+                'g_materno' => 'LOPEZ',
+                'g_name' => 'JUAN CARLOS',
+                'g_curp' => '',
+                'phone' => '9512441693',
+                'email' => 'nuevo@correo.mx',
+                'kinship' => 'PADRE',
+            ]),
+        ]);
+
+        $summary = app(SyncDirectoryDetailsService::class)->sync($this->path, $year->id, '1°', dryRun: false);
+
+        $this->assertSame([], $summary['errors']);
+        $student->refresh()->load('guardians.profile');
+        $this->assertTrue($student->guardians->contains('id', $existing->id));
+        $this->assertSame('MALJ800101HOCRPR09', $student->guardians->firstWhere('id', $existing->id)?->profile?->national_id);
+        $this->assertFalse(
+            $student->guardians->contains(
+                fn (Guardian $g) => str_starts_with((string) $g->profile?->national_id, 'NO_ESPECIFICADO')
+            )
+        );
     }
 
     public function test_same_tutor_by_name_gets_excel_phone_without_duplicate(): void

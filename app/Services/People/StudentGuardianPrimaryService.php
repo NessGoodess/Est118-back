@@ -145,6 +145,51 @@ class StudentGuardianPrimaryService
     }
 
     /**
+     * Keep at most one secondary per student (lowest sort_order, then id).
+     * Clears secondary when the same row is also primary.
+     */
+    public function ensureAtMostOneSecondary(int $studentId): void
+    {
+        $rows = $this->rowsFor($studentId);
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        foreach ($rows as $row) {
+            if ((bool) $row->is_primary && (bool) $row->is_secondary) {
+                DB::table('guardian_student')->where('id', $row->id)->update([
+                    'is_secondary' => false,
+                ]);
+            }
+        }
+
+        $rows = $this->rowsFor($studentId);
+        $secondaries = $rows
+            ->filter(fn ($row) => (bool) $row->is_secondary && ! (bool) $row->is_primary)
+            ->values();
+
+        if ($secondaries->count() <= 1) {
+            return;
+        }
+
+        $keepId = (int) $secondaries->first()->id;
+        DB::table('guardian_student')
+            ->where('student_id', $studentId)
+            ->where('id', '!=', $keepId)
+            ->where('is_secondary', true)
+            ->update(['is_secondary' => false]);
+    }
+
+    /**
+     * Normalize primary and secondary flags after link/merge/detach.
+     */
+    public function normalizeRoles(int $studentId): void
+    {
+        $this->ensureExactlyOne($studentId);
+        $this->ensureAtMostOneSecondary($studentId);
+    }
+
+    /**
      * @return Collection<int, object{id: int, guardian_id: int, is_primary: mixed, is_secondary: mixed}>
      */
     private function rowsFor(int $studentId): Collection

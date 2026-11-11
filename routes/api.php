@@ -34,6 +34,7 @@ use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\School\AcademicYearController;
 use App\Http\Controllers\School\ReEnrollmentApplicationController;
 use App\Http\Controllers\School\ReEnrollmentPeriodController;
+use App\Http\Controllers\GuardianLinkageReportController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\StudentCredentialPrintingController;
 use App\Http\Controllers\Print\CardTemplateController;
@@ -575,6 +576,12 @@ Route::prefix('export-templates')->middleware(['auth:sanctum', 'verified', 'perm
     Route::post('/', [ExportTemplateController::class, 'store']);
     Route::patch('/{exportTemplate}/default', [ExportTemplateController::class, 'setDefault']);
     Route::delete('/{exportTemplate}', [ExportTemplateController::class, 'destroy']);
+});
+
+Route::middleware(['auth:sanctum', 'verified'])->group(function () {
+    Route::get('/guardians/{guardian}/linkage-report.pdf', [GuardianLinkageReportController::class, 'pdf'])
+        ->whereNumber('guardian')
+        ->middleware('permission:view students|edit students');
 });
 
 /**

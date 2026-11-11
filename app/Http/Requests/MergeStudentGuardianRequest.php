@@ -35,6 +35,7 @@ class MergeStudentGuardianRequest extends FormRequest
             'pending.email' => ['nullable', 'email', 'max:255'],
             'pending.relationship' => ['nullable', 'string', 'max:50'],
             'pending.curp' => ['nullable', 'string', 'size:18'],
+            'confirm_multi_student' => ['sometimes', 'boolean'],
         ];
     }
 }

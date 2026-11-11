@@ -19,6 +19,7 @@ class AttachStudentGuardianRequest extends FormRequest
         return [
             'guardian_id' => ['required', 'integer', 'exists:guardians,id'],
             'relationship' => ['nullable', 'string', 'max:50'],
+            'confirm_multi_student' => ['sometimes', 'boolean'],
         ];
     }
 }

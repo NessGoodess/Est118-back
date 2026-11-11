@@ -224,6 +224,107 @@ class StudentFamilyTest extends TestCase
         $this->assertDatabaseMissing('guardians', ['id' => $canonical->id]);
     }
 
+    public function test_merge_preserves_secondary_and_requires_multi_student_confirm(): void
+    {
+        $this->actingEditor();
+        config(['guardians.multi_student_warn_threshold' => 2]);
+
+        $a = $this->student('ANA', 'TORRES');
+        $b = $this->student('LUIS', 'TORRES');
+        $c = $this->student('SOFIA', 'TORRES');
+        $draft = $this->guardian('ROSA', 'SINCURP', null);
+        $canonical = $this->guardian('ROSA', 'LOPEZ', 'LOPR850101MDFPRS09');
+        $father = $this->guardian('CARLOS', 'MORA', null);
+
+        $a->guardians()->syncWithoutDetaching([
+            $draft->id => ['relationship' => 'Madre', 'is_primary' => true, 'is_secondary' => false, 'sort_order' => 0],
+            $father->id => ['relationship' => 'Padre', 'is_primary' => false, 'is_secondary' => true, 'sort_order' => 1],
+        ]);
+        $b->guardians()->syncWithoutDetaching([
+            $canonical->id => ['relationship' => 'Madre', 'is_primary' => true, 'sort_order' => 0],
+        ]);
+        $c->guardians()->syncWithoutDetaching([
+            $canonical->id => ['relationship' => 'Madre', 'is_primary' => true, 'sort_order' => 0],
+        ]);
+
+        $this->postJson("/api/students/{$a->id}/guardians/merge-by-curp", [
+            'draft_guardian_id' => $draft->id,
+            'canonical_guardian_id' => $canonical->id,
+            'survivor' => 'canonical',
+            'relationship' => 'Madre',
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'guardian_multi_student_confirm');
+
+        $this->postJson("/api/students/{$a->id}/guardians/merge-by-curp", [
+            'draft_guardian_id' => $draft->id,
+            'canonical_guardian_id' => $canonical->id,
+            'survivor' => 'canonical',
+            'relationship' => 'Madre',
+            'confirm_multi_student' => true,
+        ])->assertOk();
+
+        $this->assertTrue($a->fresh()->guardians()->whereKey($canonical->id)->exists());
+        $this->assertTrue(
+            (bool) $a->fresh()->guardians()->whereKey($father->id)->first()?->pivot?->is_secondary
+        );
+        $this->assertTrue(
+            (bool) $a->fresh()->guardians()->whereKey($canonical->id)->first()?->pivot?->is_primary
+        );
+    }
+
+    public function test_attach_requires_multi_student_confirm_above_threshold(): void
+    {
+        $this->actingEditor();
+        config(['guardians.multi_student_warn_threshold' => 2]);
+
+        $a = $this->student('ANA', 'TORRES');
+        $b = $this->student('LUIS', 'TORRES');
+        $a->siblings()->syncWithoutDetaching([$b->id]);
+        $b->siblings()->syncWithoutDetaching([$a->id]);
+
+        $guardian = $this->guardian('ROSA', 'LOPEZ', null);
+        foreach (['X', 'Y', 'Z'] as $i => $letter) {
+            $child = $this->student("H{$letter}", 'LOPEZ');
+            $child->guardians()->syncWithoutDetaching([
+                $guardian->id => ['relationship' => 'Madre', 'is_primary' => true, 'sort_order' => $i],
+            ]);
+        }
+        // Make the guardian also belong to sibling B so attach is allowed.
+        $b->guardians()->syncWithoutDetaching([
+            $guardian->id => ['relationship' => 'Madre', 'is_primary' => true, 'sort_order' => 0],
+        ]);
+
+        $this->postJson("/api/students/{$a->id}/guardians/attach", [
+            'guardian_id' => $guardian->id,
+            'relationship' => 'Madre',
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'guardian_multi_student_confirm');
+
+        $this->postJson("/api/students/{$a->id}/guardians/attach", [
+            'guardian_id' => $guardian->id,
+            'relationship' => 'Madre',
+            'confirm_multi_student' => true,
+        ])->assertOk();
+
+        $this->assertTrue($a->fresh()->guardians()->whereKey($guardian->id)->exists());
+    }
+
+    public function test_linkage_report_pdf_downloads(): void
+    {
+        $this->actingEditor();
+        $student = $this->student('ANA', 'TORRES');
+        $guardian = $this->guardian('ROSA', 'LOPEZ', 'LOPR850101MDFPRS09');
+        $student->guardians()->syncWithoutDetaching([
+            $guardian->id => ['relationship' => 'Madre', 'is_primary' => true, 'sort_order' => 0],
+        ]);
+
+        $this->get("/api/guardians/{$guardian->id}/linkage-report.pdf")
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+    }
+
     public function test_search_students_by_name(): void
     {
         $this->actingEditor();

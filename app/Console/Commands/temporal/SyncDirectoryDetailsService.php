@@ -508,36 +508,96 @@ class SyncDirectoryDetailsService
     {
         $studentCurp = strtoupper(trim((string) $student->profile?->national_id));
         $guardianCurp = $this->usableTutorCurp($row['g_curp'], $studentCurp);
-        if ($guardianCurp === null) {
-            $guardianCurp = self::unspecifiedCurp();
-        }
-
         $kinship = $row['kinship'] !== '' ? $row['kinship'] : null;
-        $guardianProfile = Profile::query()->firstOrCreate(
-            ['national_id' => $guardianCurp],
-            [
-                'first_name' => $row['g_name'] !== '' ? $row['g_name'] : self::NOT_SPECIFIED,
-                'last_name' => trim($row['g_paterno'].' '.$row['g_materno']) ?: self::NOT_SPECIFIED,
-                'gender' => 'O',
-                'phone_number' => $phone,
-                'email' => $email,
-            ]
-        );
-        if ($phone !== null) {
-            $guardianProfile->phone_number = $phone;
-        }
-        if ($email !== null) {
-            $guardianProfile->email = $email;
-        }
-        $guardianProfile->save();
 
-        $guardian = Guardian::query()->firstOrCreate(
-            ['profile_id' => $guardianProfile->id],
-            ['Kinship' => $kinship]
-        );
+        // Prefer reusing an existing real-CURP tutor with the same name + phone
+        // before inventing a NO_ESPECIFICADO sentinel.
+        $reused = null;
+        if ($guardianCurp === null) {
+            $reused = $this->findGuardianByNameAndPhone(
+                $this->excelTutorName($row),
+                $phone
+            );
+        }
+
+        if ($reused) {
+            $guardian = $reused;
+            $guardianProfile = $guardian->profile;
+            if ($guardianProfile && $email !== null && $this->isBlank((string) $guardianProfile->email)) {
+                $guardianProfile->email = $email;
+                $guardianProfile->save();
+            }
+        } else {
+            if ($guardianCurp === null) {
+                $guardianCurp = self::unspecifiedCurp();
+            }
+
+            $guardianProfile = Profile::query()->firstOrCreate(
+                ['national_id' => $guardianCurp],
+                [
+                    'first_name' => $row['g_name'] !== '' ? $row['g_name'] : self::NOT_SPECIFIED,
+                    'last_name' => trim($row['g_paterno'].' '.$row['g_materno']) ?: self::NOT_SPECIFIED,
+                    'gender' => 'O',
+                    'phone_number' => $phone,
+                    'email' => $email,
+                ]
+            );
+            if ($phone !== null) {
+                $guardianProfile->phone_number = $phone;
+            }
+            if ($email !== null) {
+                $guardianProfile->email = $email;
+            }
+            $guardianProfile->save();
+
+            $guardian = Guardian::query()->firstOrCreate(
+                ['profile_id' => $guardianProfile->id],
+                ['Kinship' => $kinship]
+            );
+        }
+
+        $alreadyLinked = $student->guardians()->where('guardians.id', $guardian->id)->exists();
         $student->guardians()->syncWithoutDetaching([
-            $guardian->id => ['relationship' => $kinship],
+            $guardian->id => $alreadyLinked
+                ? ['relationship' => $kinship]
+                : $student->guardianAttachPivot($kinship),
         ]);
+
+        app(\App\Services\People\StudentGuardianPrimaryService::class)
+            ->normalizeRoles((int) $student->id);
+    }
+
+    private function findGuardianByNameAndPhone(string $excelName, ?string $phoneDigits): ?Guardian
+    {
+        if ($excelName === '' || $phoneDigits === null || $phoneDigits === '') {
+            return null;
+        }
+
+        $candidates = Guardian::query()
+            ->with('profile')
+            ->whereHas('profile', function ($q) {
+                $q->whereNotNull('national_id')
+                    ->where('national_id', '!=', '')
+                    ->where('national_id', 'not like', self::NOT_SPECIFIED.'%')
+                    ->where('national_id', 'not like', 'TUT%');
+            })
+            ->get();
+
+        foreach ($candidates as $guardian) {
+            $profile = $guardian->profile;
+            if (! $profile) {
+                continue;
+            }
+            $dbPhone = $this->digits((string) $profile->phone_number);
+            if ($dbPhone === null || $dbPhone !== $phoneDigits) {
+                continue;
+            }
+            if ($this->namesMatch($excelName, $this->profileName($profile))) {
+                return $guardian;
+            }
+        }
+
+        return null;
     }
 
     /**

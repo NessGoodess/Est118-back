@@ -106,12 +106,13 @@ class StudentsService
             }
 
             $curp = Curp::normalize($data['curp'] ?? null);
+            $derived = $curp !== '' ? Curp::derive($curp) : null;
             $attributes = [
                 'first_name' => trim($data['first_name']),
                 'last_name' => trim($data['last_name']),
                 'second_last_name' => trim((string) ($data['second_last_name'] ?? '')) ?: null,
-                'birth_date' => $data['birth_date'] ?? null,
-                'gender' => ($data['gender'] ?? null) ?: null,
+                'birth_date' => ($data['birth_date'] ?? null) ?: ($derived['birth_date'] ?? null),
+                'gender' => (($data['gender'] ?? null) ?: null) ?: ($derived['gender'] ?? null),
                 'phone_number' => ($data['phone'] ?? null) ?: null,
                 'email' => ($data['email'] ?? null) ?: null,
             ];

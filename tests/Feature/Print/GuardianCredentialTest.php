@@ -112,6 +112,47 @@ class GuardianCredentialTest extends TestCase
         $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
 
         $this->assertSame("MIGUEL SANCHEZ MORALES\n722 555 1212\nPadre", $payload['second_guardian']);
+        $this->assertFalse($payload['second_guardian_conflict'] ?? false);
+    }
+
+    public function test_second_guardian_consensus_same_and_partial_and_conflict(): void
+    {
+        $mother = $this->guardian('PATRICIA', 'SANCHEZ', 'MORALES');
+        $father = $this->guardian('MIGUEL', 'SANCHEZ', 'MORALES');
+        $uncle = $this->guardian('CARLOS', 'SANCHEZ', null);
+        $father->profile->update(['phone_number' => '722 555 1212']);
+
+        $camila = $this->student('CAMILA', 'SANCHEZ', '1°', 'B');
+        $mateo = $this->student('MATEO', 'SANCHEZ', '3°', 'E');
+        $this->link($camila, $mother, 'Madre', primary: true);
+        $this->link($mateo, $mother, 'Madre', primary: true);
+        $this->link($camila, $father, 'Padre', secondary: true);
+        $this->link($mateo, $father, 'Padre', secondary: true);
+
+        $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
+        $this->assertSame("MIGUEL SANCHEZ MORALES\n722 555 1212\nPadre", $payload['second_guardian']);
+        $this->assertFalse($payload['second_guardian_conflict']);
+
+        // Partial: only one child has secondary → still prints that person.
+        $mateo->guardians()->updateExistingPivot($father->id, ['is_secondary' => false]);
+        $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
+        $this->assertSame("MIGUEL SANCHEZ MORALES\n722 555 1212\nPadre", $payload['second_guardian']);
+        $this->assertFalse($payload['second_guardian_conflict']);
+
+        // Conflict: distinct secondaries → blank + conflict flag.
+        $mateo->guardians()->updateExistingPivot($father->id, ['is_secondary' => false]);
+        $this->link($mateo, $uncle, 'Tío', secondary: true);
+        $camila->guardians()->updateExistingPivot($father->id, ['is_secondary' => true]);
+
+        $payload = app(StudentCardRenderService::class)->payloadFromGuardian($mother->fresh());
+        $this->assertSame('', $payload['second_guardian']);
+        $this->assertTrue($payload['second_guardian_conflict']);
+
+        $row = collect(
+            $this->getJson('/api/credential-prints/people?kind=guardians')->json('data')
+        )->firstWhere('id', $mother->id);
+        $this->assertNull($row['second_guardian']);
+        $this->assertTrue($row['second_guardian_conflict']);
     }
 
     public function test_guardian_batch_goes_to_the_zebra_with_guardian_design(): void

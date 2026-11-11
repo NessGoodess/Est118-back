@@ -118,8 +118,12 @@ class StudentSiblingService
     /**
      * Attach an existing guardian that belongs to a sibling.
      */
-    public function attachGuardian(Student $student, int $guardianId, ?string $relationship = null): Student
-    {
+    public function attachGuardian(
+        Student $student,
+        int $guardianId,
+        ?string $relationship = null,
+        bool $confirmMultiStudent = false,
+    ): Student {
         $guardian = Guardian::query()->with('students')->find($guardianId);
         if (! $guardian) {
             throw new RuntimeException('El tutor indicado no existe.');
@@ -133,18 +137,30 @@ class StudentSiblingService
             throw new RuntimeException('Solo se pueden vincular tutores que ya estén ligados a un hermano de este alumno.');
         }
 
+        $alreadyLinked = $student->guardians()->where('guardians.id', $guardian->id)->exists();
+        if (! $alreadyLinked) {
+            $report = app(\App\Services\People\GuardianLinkageReportService::class);
+            $context = $report->payloadForGuardian($guardian);
+            // After attach, this student would also be linked.
+            $projected = (int) $context['linked_count'] + 1;
+            $context['linked_count'] = $projected;
+            $context['requires_confirmation'] = $report->requiresConfirmation($projected);
+            if (($context['requires_confirmation'] ?? false) && ! $confirmMultiStudent) {
+                throw new \App\Exceptions\GuardianMultiStudentConfirmationException($context);
+            }
+        }
+
         $rel = trim((string) $relationship);
         $rel = $rel === '' ? ($guardian->students->firstWhere('id', '!=', $student->id)?->pivot?->relationship) : $rel;
         $rel = $rel === '' ? null : $rel;
 
-        $alreadyLinked = $student->guardians()->where('guardians.id', $guardian->id)->exists();
         $student->guardians()->syncWithoutDetaching([
             $guardian->id => $alreadyLinked
                 ? ['relationship' => $rel]
                 : $student->guardianAttachPivot($rel),
         ]);
 
-        app(StudentGuardianPrimaryService::class)->ensureExactlyOne((int) $student->id);
+        app(StudentGuardianPrimaryService::class)->normalizeRoles((int) $student->id);
 
         return app(StudentsService::class)->findForDetail($student->id);
     }

@@ -134,7 +134,16 @@ class GuardianCredentialData
     }
 
     /**
-     * @return array<int, array{student_id: int, grade_group: string, first_name: string, last_names: string}>
+     * @return array<int, array{
+     *   student_id: int,
+     *   grade_group: string,
+     *   grade_level_id: int|null,
+     *   class_group_id: int|null,
+     *   grade_name: string,
+     *   group_name: string,
+     *   first_name: string,
+     *   last_names: string
+     * }>
      */
     public function dependents(
         Guardian $guardian,
@@ -142,12 +151,22 @@ class GuardianCredentialData
         ?int $groupId = null
     ): array {
         return $this->primaryActiveStudents($guardian, $gradeId, $groupId)
-            ->map(fn (Student $s) => [
-                'student_id' => (int) $s->id,
-                'grade_group' => $this->gradeGroup($s),
-                'first_name' => (string) ($s->profile->first_name ?? ''),
-                'last_names' => $s->profile->fullLastName(),
-            ])
+            ->map(function (Student $s) {
+                $classGroup = $this->credentialEnrollment($s)?->classGroup;
+
+                return [
+                    'student_id' => (int) $s->id,
+                    'grade_group' => $this->gradeGroup($s),
+                    'grade_level_id' => $classGroup?->grade_level_id
+                        ? (int) $classGroup->grade_level_id
+                        : null,
+                    'class_group_id' => $classGroup?->id ? (int) $classGroup->id : null,
+                    'grade_name' => (string) ($classGroup?->gradeLevel?->name ?? ''),
+                    'group_name' => (string) ($classGroup?->name ?? ''),
+                    'first_name' => (string) ($s->profile->first_name ?? ''),
+                    'last_names' => $s->profile->fullLastName(),
+                ];
+            })
             ->all();
     }
 

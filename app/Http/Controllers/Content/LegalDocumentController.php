@@ -9,8 +9,8 @@ use App\Services\Media\PublicMediaStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class LegalDocumentController extends Controller
 {
@@ -91,26 +91,31 @@ class LegalDocumentController extends Controller
 
     /**
      * GET /legal-documents/{type}/file
-     * Streams the PDF so the browser can save it without leaving the page.
+     * Inline PDF for the page viewer. Drafts and the student-photo notice
+     * require a manager (?manage=1). Bytes are never served from /storage.
      */
-    public function file(Request $request, string $type): StreamedResponse
+    public function file(Request $request, string $type): BinaryFileResponse
     {
         $document = $this->visibleDocument($request, $type);
+        $absolute = $this->media->materializeLegalPdf($document->src);
 
-        if (! $document->src) {
+        if ($absolute === null) {
             abort(404);
         }
 
-        $path = $this->media->relativePath($document->src);
-        if ($path === null || ! Storage::disk(PublicMediaStorageService::DISK)->exists($path)) {
-            abort(404);
-        }
+        $filename = $this->inlinePdfFilename($document->original_name ?: $document->title);
 
-        $name = $document->original_name ?: ($document->title.'.pdf');
-
-        return Storage::disk(PublicMediaStorageService::DISK)->download($path, $name, [
+        $response = response()->file($absolute, [
             'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="'.$filename.'"',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
+
+        // Never cache legal PDFs: publish/replace/delete must show up immediately.
+        $response->setPrivate();
+        $response->headers->addCacheControlDirective('no-store');
+
+        return $response;
     }
 
     public function upsert(UpsertLegalDocumentRequest $request, string $type): JsonResponse
@@ -126,7 +131,14 @@ class LegalDocumentController extends Controller
         $document->updated_by = $request->user()?->id;
 
         if (array_key_exists('src', $validated) && filled($validated['src'])) {
-            $document->src = $this->media->toStoredSrc($validated['src']) ?? $validated['src'];
+            $relative = $this->media->legalRelativePath($validated['src']);
+            if ($relative === null) {
+                throw ValidationException::withMessages([
+                    'src' => 'El archivo PDF no es válido.',
+                ]);
+            }
+
+            $document->src = $relative;
         }
 
         if ($request->has('publish_action')) {
@@ -143,10 +155,37 @@ class LegalDocumentController extends Controller
             && filled($document->src)
             && ! $this->media->sameStoredFile($document->src, $previousSrc)
         ) {
-            $this->media->delete($previousSrc);
+            $this->media->deleteLegalPdf($previousSrc);
         }
 
         return response()->json($document->fresh());
+    }
+
+    /**
+     * DELETE /legal-documents/{type}
+     * Removes the PDF and the row. The admin card returns to an empty slot.
+     */
+    public function destroy(string $type): JsonResponse
+    {
+        if (! in_array($type, LegalDocument::TYPES, true)) {
+            abort(404);
+        }
+
+        $document = LegalDocument::query()->where('type', $type)->first();
+
+        if ($document) {
+            $this->media->deleteLegalPdf($document->src);
+            $document->delete();
+        }
+
+        return response()->json([
+            'id' => null,
+            'type' => $type,
+            'title' => LegalDocument::defaultTitle($type),
+            'src' => null,
+            'original_name' => null,
+            'published_at' => null,
+        ]);
     }
 
     private function visibleDocument(Request $request, string $type): LegalDocument
@@ -189,5 +228,19 @@ class LegalDocumentController extends Controller
         }
 
         return now();
+    }
+
+    private function inlinePdfFilename(string $name): string
+    {
+        $base = trim(str_replace(["\r", "\n", '"', '\\', '/'], '', $name));
+        if ($base === '') {
+            $base = 'documento.pdf';
+        }
+
+        if (! str_ends_with(strtolower($base), '.pdf')) {
+            $base .= '.pdf';
+        }
+
+        return $base;
     }
 }

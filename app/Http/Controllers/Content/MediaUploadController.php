@@ -52,11 +52,11 @@ class MediaUploadController extends Controller
     public function storePdf(StoreLegalPdfUploadRequest $request): JsonResponse
     {
         $file = $request->file('file');
-        $path = $this->media->storePdf($file, PublicMediaStorageService::LEGAL_DOCUMENTS_DIR);
+        $path = $this->media->storePrivatePdf($file, PublicMediaStorageService::LEGAL_DOCUMENTS_DIR);
 
         return response()->json([
             'path' => $path,
-            'src' => $this->media->publicPath($path),
+            'src' => $path,
             'name' => $file->getClientOriginalName(),
         ], 201);
     }

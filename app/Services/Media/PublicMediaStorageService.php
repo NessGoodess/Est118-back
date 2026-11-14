@@ -20,6 +20,8 @@ class PublicMediaStorageService
 {
     public const DISK = 'public';
 
+    public const PRIVATE_DISK = 'private';
+
     public const ANNOUNCEMENTS_DIR = 'announcements';
     public const GALLERIES_DIR = 'galleries';
     public const EVENTS_DIR = 'events';
@@ -52,7 +54,7 @@ class PublicMediaStorageService
     }
 
     /**
-     * Stores a PDF as-is and returns its relative disk path.
+     * Stores a PDF as-is on the public disk and returns its relative path.
      */
     public function storePdf(UploadedFile $file, string $directory): string
     {
@@ -60,6 +62,98 @@ class PublicMediaStorageService
         Storage::disk(self::DISK)->put($path, file_get_contents($file->getRealPath()));
 
         return $path;
+    }
+
+    /**
+     * Stores a legal PDF on the private disk. It is not reachable from /storage.
+     */
+    public function storePrivatePdf(UploadedFile $file, string $directory): string
+    {
+        $path = $this->buildPath($directory, 'pdf');
+        $contents = file_get_contents($file->getRealPath());
+        if ($contents === false) {
+            throw new \RuntimeException('No se pudo leer el PDF.');
+        }
+
+        Storage::disk(self::PRIVATE_DISK)->put($path, $contents);
+
+        return $path;
+    }
+
+    /**
+     * Relative legal-documents/*.pdf path, or null when src is not one of ours.
+     */
+    public function legalRelativePath(?string $src): ?string
+    {
+        $path = $this->relativePath($src);
+        if (! is_string($path) || $path === '') {
+            return null;
+        }
+
+        $path = str_replace('\\', '/', $path);
+        if (
+            str_contains($path, '..')
+            || str_starts_with($path, '/')
+            || ! str_starts_with($path, self::LEGAL_DOCUMENTS_DIR.'/')
+            || ! str_ends_with(strtolower($path), '.pdf')
+        ) {
+            return null;
+        }
+
+        return $path;
+    }
+
+    /**
+     * Absolute path of a legal PDF on the private disk.
+     * A copy still on the public disk is moved across on first read.
+     */
+    public function materializeLegalPdf(?string $src): ?string
+    {
+        $path = $this->legalRelativePath($src);
+        if ($path === null) {
+            return null;
+        }
+
+        $private = Storage::disk(self::PRIVATE_DISK);
+        $public = Storage::disk(self::DISK);
+
+        if (! $private->exists($path) && $public->exists($path)) {
+            $contents = $public->get($path);
+            if ($contents === null) {
+                return null;
+            }
+
+            $private->put($path, $contents);
+            $public->delete($path);
+        }
+
+        if (! $private->exists($path)) {
+            return null;
+        }
+
+        return $private->path($path);
+    }
+
+    public function deleteLegalPdf(?string $src): void
+    {
+        $path = $this->legalRelativePath($src);
+        if ($path === null) {
+            return;
+        }
+
+        foreach ([self::PRIVATE_DISK, self::DISK] as $disk) {
+            try {
+                if (Storage::disk($disk)->exists($path)) {
+                    Storage::disk($disk)->delete($path);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Could not delete legal PDF', [
+                    'src' => $src,
+                    'disk' => $disk,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     /**

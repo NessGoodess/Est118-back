@@ -527,11 +527,15 @@ Route::prefix('identity-banners')->group(function () {
 Route::prefix('legal-documents')->group(function () {
     Route::get('/', [LegalDocumentController::class, 'index']);
     Route::get('/{type}/file', [LegalDocumentController::class, 'file'])
-        ->middleware('throttle:5,1');
+        ->middleware('throttle:60,1');
     Route::get('/{type}', [LegalDocumentController::class, 'show']);
 
     Route::middleware(['auth:sanctum', 'verified', 'permission:create legal documents'])->group(function () {
         Route::put('/{type}', [LegalDocumentController::class, 'upsert']);
+    });
+
+    Route::middleware(['auth:sanctum', 'verified', 'permission:delete legal documents'])->group(function () {
+        Route::delete('/{type}', [LegalDocumentController::class, 'destroy']);
     });
 });
 
